@@ -1,0 +1,1289 @@
+diff --git a/VLA/VLAAdapter/README_lang_spectral.md b/VLA/VLAAdapter/README_lang_spectral.md
+new file mode 100644
+index 0000000..0bf8f95
+--- /dev/null
++++ b/VLA/VLAAdapter/README_lang_spectral.md
+@@ -0,0 +1,111 @@
++# lang_spectral：在 Pion 代码上研究"语言是否拿到了更新预算"
++
++本补丁只改 `Pion/VLA/VLAAdapter`，对应研究问题 Q8、Q9、Q11：
++
++- **Q8**：在语言必需的套件上，比较不同优化器的语言依赖程度，而不只看成功率。
++- **Q9**：把 LLM 权重的梯度和实际更新按 token 类型（vision / lang / action）精确分解，看语言 token 在每一步更新里分到多少预算，以及 Muon / Pion 相对 SGD 是放大还是压制了它。
++- **Q11**：追踪各类 token 表征的谱结构（stable rank / erank）；并提供 `LangGuard`，对语言输入子空间做保护（不被白化或高通滤掉）。
++
++## 改动清单
++
++| 文件 | 内容 |
++|---|---|
++| `lang_spectral/token_types.py` | 给 LLM 序列的每个位置打标签：`[BOS][P 个视觉 patch][文本…][动作 query…][stop]` |
++| `lang_spectral/grad_probe.py` | Q9 梯度分解探针 + Q11 表征谱。只读，不改变训练 |
++| `lang_spectral/optim_lang.py` | `LangSubspaceTracker`（在线估计语言输入子空间）+ `LangGuard` 优化器（Muon/Pion 骨架不变） |
++| `lang_spectral/check_math_numpy.py` | 不依赖 torch 的数学自检和玩具演示 |
++| `vla-scripts/finetune_pion.py` | 新增配置项；`optimizer_L` 可选 `LangGuardMuon` / `LangGuardPion`；训练循环接入探针 |
++| `experiments/robot/libero/run_libero_eval.py` | 新增 `--instruction_mode {orig,empty,other,shuffle}` |
++| `scripts/run_lang_matrix.sh` | 训练矩阵（7 个 arm） |
++| `scripts/eval_lang_modes.sh` | 一个 checkpoint 在 4 种指令下的评测 |
++
++原有的 `run_{adamw,muon,pion}.sh` 不受影响：新配置项默认关闭（`lang_probe_every=0`，`optimizer_L` 默认仍为 `Muon`）。
++
++## Q9 测的是什么
++
++线性层在每个位置 t 上做 `y_t = W x_t`，所以权重梯度可以精确拆开：
++
++```
++G = Σ_t d_t x_tᵀ = Σ_τ G_τ ,   G_τ = Σ_{t∈τ} d_t x_tᵀ
++```
++
++探针在每个被测层、每种 token 类型上记录（jsonl 写在 `run_dir/lang_probe.jsonl`，同时进 wandb）：
++
++| 指标 | 定义 | 含义 |
++|---|---|---|
++| `credit` | ⟨G_τ, G⟩ / ‖G‖² | SGD 会把多少一阶下降分给 τ（各类型之和为 1） |
++| `budget` | ⟨G_τ, U⟩ / ⟨G, U⟩，U = 实际更新（已去掉 weight decay） | 当前优化器实际分给 τ 的份额（之和为 1） |
++| `amplification` | budget / credit | >1：优化器放大了 τ；<1：压制了 τ |
++| `energy`, `erank` | ‖G_τ‖² 占比、G_τ 的有效秩 | 语言梯度是否"弱且低秩" |
++| `top_overlap` | G_τ 落在 U 的 top-k 奇异子空间里的能量比例 | 更新的主方向是否服务于语言 |
++
++`U` 用"step 前后权重差"计算，所以对 AdamW、Muon、Pion、LangGuard 都适用，不依赖优化器内部实现。
++
++Q11 部分记录每个被测 decoder 层输出中 vision / lang / action token 的 stable rank、erank、平均范数，以及语言与视觉 token 均值的余弦（"表征混合"指标）。
++
++## 读代码时发现的几件事（做实验前需要知道）
++
++1. **Pion 里的 "L" 是整个 LLM，不是语言模态。** `get_modality` 按参数名分组，`language_model` 下的权重同时处理视觉 patch、文本和动作 query。所以论文里"L 换成 Muon 后 LIBERO-Object 从 43.6 到 94.6"说明的是 LLM 骨干受益，不等于语言被更好地使用。Q9 的分解正好能把这两件事分开。
++
++2. **纯 Suppression（k_p=0）的截止点是能量占比约 2/3。** 高通 NS 先做 Frobenius 归一化，`f_s(σ)=2.5σ³−1.5σ⁵` 的不稳定不动点在 σ=√(2/3)≈0.816。由于归一化后 Σσ²=1，**最多只有一个方向能超过这个阈值**：k_p=0、k=5 时，每个矩阵的更新实际上最多保留 1 个方向，或者接近 0。`check_math_numpy.py` 里有数值验证（rank≥2 且没有占绝对优势的方向时，保留方向数为 0）。这对 L 很关键：任何能量占比小的语言方向都会被整体删掉。论文自己的消融里 L 用 Pion 只有 73.8，而 Muon 有 94.6，与这个机制一致。做 `pion_L`、`lg_pion` 时建议同时扫 `PROMOTION_STEPS=1,2`。
++
++3. **AdamW 基线的学习率与 Muon 相同（1e-4），没有单独调。** 如果要论证"Muon 比 AdamW 更依赖语言"，AdamW 至少要扫一组学习率，否则差异可能来自学习率。
++
++4. **注意力是否双向需要先确认。** `requirements.txt` 用的是 OpenVLA-OFT 的 transformers fork（为并行解码改成双向注意力），但这个 fork 是否对 Qwen2 生效，要在你的环境里打印 attention mask 确认。如果是因果注意力，视觉 patch 位于文本之前，动作头读取的 patch hidden states 在结构上就看不到语言，语言只能经由动作 query 进入动作。这会直接影响 Q4 信息流分析的解读。
++
++5. **LIBERO-Object 和 Spatial 基本不需要语言**（每个布局对应一个任务），所以默认套件改成 LIBERO-Goal（10 个任务共享一个场景）。Object / Spatial 作为对照：预期所有优化器的 LRI 都接近 0。
++
++## 使用
++
++把整个补丁打到你自己的 Pion clone 上：
++
++```bash
++cd Pion
++git apply --index pion-lang-spectral.patch
++cd VLA/VLAAdapter
++python lang_spectral/check_math_numpy.py        # 不需要 GPU / torch
++```
++
++**冒烟测试（单卡，几分钟）**：确认钩子、日志和 LangGuard 都能跑。
++
++```bash
++NPROC=1 CUDA_VISIBLE_DEVICES=0 BATCH_SIZE=2 MAX_STEPS=30 SAVE_FREQ=1000 \
++LANG_PROBE_EVERY=10 ARM=lg_muon bash scripts/run_lang_matrix.sh
++# 检查：日志里有 "# lang_probe: N linears"；run_dir 下有 lang_probe.jsonl；
++#      grad_mean/lang/credit + vision/credit + action/credit + other/credit ≈ 1
++#      grad_mean/*/budget 之和 ≈ 1（同一层内严格为 1）
++```
++
++**训练矩阵**（每个 arm 一次）：
++
++```bash
++for arm in adamw muon pion pion_L lg_muon lg_pion lg_off; do
++  ARM=$arm DATA_NAME=libero_goal_no_noops MAX_STEPS=15000 bash scripts/run_lang_matrix.sh
++done
++# 可扫：PROMOTION_STEPS=0/1/2；LG_GAMMA=0.25/0.5/1；LG_MODE=ns/linear；LR（AdamW）
++```
++
++**评测**：
++
++```bash
++CKPT=$(ls -d outputs/lang_matrix/*lg_muon*--15000_chkpt | tail -1) \
++SUITE=libero_goal bash scripts/eval_lang_modes.sh
++```
++
++在 LIBERO-Goal 上，`other` 模式下给策略的是另一个任务的指令，而成功判定仍按环境自己的任务。所以：
++
++- `SR_orig`：正确指令下的成功率。
++- `SR_other`：视觉捷径率，越低说明越依赖语言。
++- **LRI = SR_orig − SR_other**：语言依赖指数。
++
++## 建议的判据（先写下来再跑）
++
++- **Q9 假设成立**：`muon` 的 `lang/amplification` 显著 >1，`pion_L` 的显著 <1；且各 arm 的 `lang/budget`（训练前 20% 步的均值）与最终 LRI 的秩相关为正。
++- **Q11 假设成立**：`adamw` 或 `pion_L` 中语言 token 表征的 stable rank 下降早于、快于视觉 token。
++- **LangGuard 有效**：`lg_muon` 或 `lg_pion` 的 LRI 高于 `pion`（3 个 seed，CI 不跨 0），且 `SR_orig` 不下降。`lg_off` 应与 `pion` 一致，否则说明实现有问题。
++
++## 局限
++
++- 探针只在 rank 0 上运行，用的是本地 batch 的梯度，而更新是全局的；结果是单分片估计。
++- `LangSubspaceTracker` 在每个 rank 上用本地数据估计子空间，没有跨 rank 同步。
++- 本补丁在没有 GPU / torch 的环境中编写，只做了语法检查和 numpy 数学自检，**必须先跑冒烟测试**。
+diff --git a/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py b/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
+index 2e45325..5610fbb 100644
+--- a/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
++++ b/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
+@@ -123,6 +123,14 @@ class GenerateConfig:
+ 
+     seed: int = 7                                    # Random Seed (for reproducibility)
+ 
++    # lang_spectral: instruction substitution for language-reliance tests
++    #   orig    -- the task's own instruction (standard eval)
++    #   empty   -- empty instruction
++    #   other   -- instruction of task (task_id + instruction_shift) % n_tasks in the same suite
++    #   shuffle -- the task's own words in a fixed random order (keeps the bag of words)
++    instruction_mode: str = "orig"
++    instruction_shift: int = 1
++
+     # fmt: on
+     save_version: str = "vla-adapter"                # version of 
+     use_pro_version: bool = True                     # encourage to use the pro models we released.
+@@ -196,6 +204,8 @@ def setup_logging(cfg: GenerateConfig):
+     """Set up logging to file and optionally to wandb."""
+     # Create run ID
+     run_id = f"EVAL-{cfg.save_version}-{DATE_TIME}"
++    if cfg.instruction_mode != "orig":
++        run_id += f"--instr-{cfg.instruction_mode}" + (f"{cfg.instruction_shift}" if cfg.instruction_mode == "other" else "")
+     if cfg.run_id_note is not None:
+         run_id += f"--{cfg.run_id_note}"
+ 
+@@ -370,6 +380,23 @@ def run_episode(
+ 
+ 
+ 
++def policy_instruction(cfg: GenerateConfig, task_suite, task_id: int, task_description: str) -> str:
++    """Instruction actually given to the policy (lang_spectral language-reliance tests)."""
++    mode = cfg.instruction_mode
++    if mode == "orig":
++        return task_description
++    if mode == "empty":
++        return ""
++    if mode == "other":
++        other = task_suite.get_task((task_id + cfg.instruction_shift) % task_suite.n_tasks)
++        return other.language
++    if mode == "shuffle":
++        words = task_description.split()
++        rng = np.random.default_rng(cfg.seed + task_id)
++        return " ".join(words[i] for i in rng.permutation(len(words)))
++    raise ValueError(f"unknown instruction_mode: {mode}")
++
++
+ def run_task(
+     cfg: GenerateConfig,
+     task_suite,
+@@ -395,6 +422,9 @@ def run_task(
+ 
+     # Initialize environment and get task description
+     env, task_description = get_libero_env(task, cfg.model_family, resolution=cfg.env_img_res)
++    prompt = policy_instruction(cfg, task_suite, task_id, task_description)
++    if prompt != task_description:
++        log_message(f"[instruction_mode={cfg.instruction_mode}] env task: {task_description!r} | policy prompt: {prompt!r}", log_file)
+ 
+     # Start episodes
+     task_episodes, task_successes = 0, 0
+@@ -424,7 +454,7 @@ def run_task(
+         success, replay_images = run_episode(
+             cfg,
+             env,
+-            task_description,
++            prompt,
+             model,
+             resize_size,
+             processor,
+diff --git a/VLA/VLAAdapter/lang_spectral/__init__.py b/VLA/VLAAdapter/lang_spectral/__init__.py
+new file mode 100644
+index 0000000..b0b28c5
+--- /dev/null
++++ b/VLA/VLAAdapter/lang_spectral/__init__.py
+@@ -0,0 +1,16 @@
++"""Language-modality diagnostics and optimizers for VLA-Adapter + Pion.
++
++* ``token_types``  -- label every LLM position as vision / lang / action / other.
++* ``grad_probe``   -- Q9: token-type decomposition of weight gradients and of the
++                      actual optimizer step; Q11: per-type representation spectra.
++* ``optim_lang``   -- Q11 remedy: ``LangGuard`` (Muon or Pion with a protected
++                      language-input subspace) and its ``LangSubspaceTracker``.
++"""
++from .token_types import LANG, VISION, ACTION, OTHER, TYPE_NAMES, TokenTypeContext, build_token_types
++from .grad_probe import TokenGradProbe, erank, stable_rank
++
++__all__ = [
++    "LANG", "VISION", "ACTION", "OTHER", "TYPE_NAMES",
++    "TokenTypeContext", "build_token_types",
++    "TokenGradProbe", "erank", "stable_rank",
++]
+diff --git a/VLA/VLAAdapter/lang_spectral/check_math_numpy.py b/VLA/VLAAdapter/lang_spectral/check_math_numpy.py
+new file mode 100644
+index 0000000..65c0b7c
+--- /dev/null
++++ b/VLA/VLAAdapter/lang_spectral/check_math_numpy.py
+@@ -0,0 +1,111 @@
++"""Torch-free check of the math behind lang_spectral (run: python -m lang_spectral.check_math_numpy).
++
++1. The token-type split of a weight gradient is exact, and both the SGD split
++   (credit) and the split of the actual step (budget) sum to 1.
++2. On a synthetic layer where language-token inputs carry a weak gradient in
++   their own input subspace, compare how much of the step's first-order loss
++   decrease is routed through language tokens under SGD, Muon, Pion
++   (pure suppression, k_p=0) and LangGuard.  This is the Q9 hypothesis in
++   miniature, using the exact polynomials from pion_optim.muon.
++"""
++import numpy as np
++
++MUON = (3.4445, -4.7750, 2.0315)
++
++
++def ns(X, steps=5):
++    X = X / (np.linalg.norm(X) + 1e-7)
++    t = X.shape[0] > X.shape[1]
++    if t:
++        X = X.T
++    for _ in range(steps):
++        A = X @ X.T
++        B = A @ X
++        X = MUON[0] * X + MUON[1] * B + MUON[2] * A @ B
++    return X.T if t else X
++
++
++def high_pass(X, kp=0, ks=5):
++    X = X / (np.linalg.norm(X) + 1e-7)
++    t = X.shape[0] > X.shape[1]
++    if t:
++        X = X.T
++    for _ in range(kp):
++        A = X @ X.T
++        X = 1.875 * X + (-1.25 * A + 0.375 * A @ A) @ X
++    for _ in range(ks):
++        A = X @ X.T
++        X = (2.5 * A - 1.5 * A @ A) @ X
++    return X.T if t else X
++
++
++def lang_guard(M, V, rest, mode="ns", gamma=0.5):
++    A = M @ V.T
++    O = rest(M - A @ V)
++    if mode == "ns":
++        O_L = ns(A) @ V
++    else:
++        O_L = (A / np.linalg.norm(A, 2)) @ V
++    return O + gamma * O_L
++
++
++def split(D, X, T, U, types=(0, 1)):
++    G = D.T @ X
++    out = {}
++    for tau in types:
++        Gt = D[T == tau].T @ X[T == tau]
++        out[tau] = (float((Gt * G).sum() / (G * G).sum()), float((Gt * U).sum() / (G * U).sum()))
++    return G, out
++
++
++def main(seed=0):
++    rng = np.random.default_rng(seed)
++    d_in, d_out, n_vis, n_lang = 96, 64, 400, 40
++    # vision inputs live in a 24-dim subspace, language inputs in a disjoint 6-dim subspace
++    Q, _ = np.linalg.qr(rng.normal(size=(d_in, d_in)))
++    Bv, Bl = Q[:, :24], Q[:, 24:30]
++    Xv = rng.normal(size=(n_vis, 24)) @ Bv.T
++    Xl = rng.normal(size=(n_lang, 6)) @ Bl.T
++    # vision tokens: strong, low-rank output gradient; language tokens: weak gradient
++    Dv = (rng.normal(size=(n_vis, 4)) * np.array([3.0, 1.0, 0.5, 0.3])) @ rng.normal(size=(4, d_out))
++    Dl = rng.normal(size=(n_lang, 3)) @ rng.normal(size=(3, d_out)) * 0.15
++    X, D = np.vstack([Xv, Xl]), np.vstack([Dv, Dl])
++    T = np.array([0] * n_vis + [1] * n_lang)
++    G = D.T @ X
++
++    # 1) exactness
++    _, sgd = split(D, X, T, G)
++    assert abs(sum(c for c, _ in sgd.values()) - 1) < 1e-9
++    assert abs(sum(b for _, b in sgd.values()) - 1) < 1e-9
++
++    # language-input basis as the tracker would estimate it from language rows
++    _, _, Vh = np.linalg.svd(Xl, full_matrices=False)
++    V = Vh[:6]
++    # 3) the split is orthogonal: rest part has no component on the language subspace
++    M_R = G - (G @ V.T) @ V
++    assert np.abs(M_R @ V.T).max() < 1e-9
++
++    steps = {
++        "SGD": G,
++        "Muon": ns(G),
++        "Pion(kp=0)": high_pass(G, 0, 5),
++        "Pion(kp=1)": high_pass(G, 1, 4),
++        "LangGuard-Muon(ns, g=.5)": lang_guard(G, V, ns, "ns", 0.5),
++        "LangGuard-Pion(kp=0, ns, g=.5)": lang_guard(G, V, lambda M: high_pass(M, 0, 5), "ns", 0.5),
++        "LangGuard-Pion(kp=0, lin, g=.5)": lang_guard(G, V, lambda M: high_pass(M, 0, 5), "linear", 0.5),
++    }
++    sg = np.linalg.svd(G / np.linalg.norm(G), compute_uv=False)
++    print(f"normalized top singular values of G: {np.round(sg[:5], 3)}")
++    print("(pure suppression keeps only directions above ~0.816, i.e. holding >2/3 of the energy)")
++    print(f"language credit under SGD: {sgd[1][0]:.4f}\n")
++    print(f"{'step':32s} {'lang budget':>12s} {'amplif.':>9s} {'vis budget':>11s} {'dirs>0.5':>9s}")
++    for name, U in steps.items():
++        _, s = split(D, X, T, U)
++        assert abs(s[0][1] + s[1][1] - 1) < 1e-6
++        su = np.linalg.svd(U / np.linalg.svd(U, compute_uv=False)[0], compute_uv=False)
++        print(f"{name:32s} {s[1][1]:12.4f} {s[1][1] / s[1][0]:9.2f} {s[0][1]:11.4f} {int((su > 0.5).sum()):9d}")
++    print("\nchecks passed")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/VLA/VLAAdapter/lang_spectral/grad_probe.py b/VLA/VLAAdapter/lang_spectral/grad_probe.py
+new file mode 100644
+index 0000000..863ef53
+--- /dev/null
++++ b/VLA/VLAAdapter/lang_spectral/grad_probe.py
+@@ -0,0 +1,323 @@
++"""Q9 + Q11 probes: how much of each weight update is driven by language tokens,
++and how the language-token representations' spectrum evolves.
++
++Q9 -- token-type decomposition of the weight gradient
++-----------------------------------------------------
++For a linear layer y = W x applied at every sequence position t,
++
++    G = dL/dW = sum_t  d_t x_t^T          (d_t = dL/dy_t, x_t = input at t)
++
++so G splits *exactly* into G = sum_tau G_tau, with G_tau summed over the
++positions of token type tau (vision / lang / action / other).  Per probed
++layer and type we log
++
++  * ``energy``  ||G_tau||_F^2 / sum_tau' ||G_tau'||_F^2
++  * ``credit``  <G_tau, G> / ||G||^2            (sums to 1 over types: SGD's split)
++  * ``budget``  <G_tau, U> / <G, U>             (sums to 1: the split of the
++                first-order loss decrease of the *actual* step U = -(W_after - W_before),
++                whatever the optimizer did to the spectrum)
++  * ``erank``   effective rank exp(H(sigma / sum sigma)) of G_tau
++  * ``top_overlap``  fraction of ||G_tau||^2 inside U's top-k left/right singular
++                subspace -- does the optimizer's dominant subspace serve language?
++
++``budget / credit`` > 1 means the optimizer amplifies that token type relative
++to plain SGD; < 1 means it suppresses it.  This is the quantity that should
++differ between AdamW, Muon and Pion if the "whitening amplifies weak language
++directions / high-pass removes them" hypothesis is right.
++
++Notes
++  * Only gradients flowing through the probed LLM linears are measured.
++  * Under DDP each rank sees its local gradient (before all-reduce) while the
++    step is global; the probe runs on rank 0 only, so treat values as
++    single-shard estimates.
++  * The weight-decay part of the step (-lr*wd*W) is removed using the
++    optimizer's own lr/wd when ``decay_of`` is given; otherwise it is included.
++
++Q11 -- representation spectra per token type
++--------------------------------------------
++For decoder layers we log, per token type, the stable rank
++||H||_F^2/||H||_2^2 and erank of the centered token matrix H (n_tau x d), and
++the cosine between the mean language and mean vision token (a cheap
++"representation mixing" indicator).
++"""
++from __future__ import annotations
++
++import json
++import math
++import re
++from pathlib import Path
++from typing import Callable, Dict, Iterable, List, Optional
++
++import torch
++import torch.nn as nn
++
++from .token_types import ACTION, LANG, OTHER, PROPRIO, TYPE_NAMES, VISION, TokenTypeContext
++
++DEFAULT_TYPES = (VISION, LANG, ACTION, OTHER)
++
++
++# ---------------------------------------------------------------------------
++# spectral helpers
++# ---------------------------------------------------------------------------
++
++def erank(s: torch.Tensor, eps: float = 1e-12) -> float:
++    s = s.float().clamp_min(0)
++    total = s.sum()
++    if total <= eps:
++        return 0.0
++    p = s / total
++    p = p[p > 0]
++    return float(torch.exp(-(p * p.log()).sum()))
++
++
++def stable_rank(s: torch.Tensor, eps: float = 1e-12) -> float:
++    s = s.float()
++    if s.numel() == 0 or s[0] <= eps:
++        return 0.0
++    return float((s ** 2).sum() / (s[0] ** 2))
++
++
++def _svdvals(m: torch.Tensor) -> torch.Tensor:
++    return torch.linalg.svdvals(m.float())
++
++
++# ---------------------------------------------------------------------------
++# module selection
++# ---------------------------------------------------------------------------
++
++_LAYER_RE = re.compile(r"layers\.(\d+)\.")
++
++
++def select_llm_linears(model: nn.Module, layer_stride: int = 4,
++                       name_filter: Optional[Callable[[str], bool]] = None) -> Dict[str, nn.Linear]:
++    """LLM decoder linears (q/k/v/o, gate/up/down), every ``layer_stride``-th layer."""
++    out = {}
++    for name, mod in model.named_modules():
++        if not isinstance(mod, nn.Linear) or "language_model" not in name:
++            continue
++        if "lora_" in name:          # under PEFT, probe the base layer only
++            continue
++        m = _LAYER_RE.search(name)
++        if m is None or int(m.group(1)) % max(1, layer_stride) != 0:
++            continue
++        if name_filter is not None and not name_filter(name):
++            continue
++        out[name] = mod
++    return out
++
++
++def select_decoder_layers(model: nn.Module, layer_stride: int = 4) -> Dict[str, nn.Module]:
++    out = {}
++    for name, mod in model.named_modules():
++        if "language_model" in name and re.search(r"layers\.(\d+)$", name):
++            if int(name.rsplit(".", 1)[-1]) % max(1, layer_stride) == 0:
++                out[name] = mod
++    return out
++
++
++def _weight_of(mod: nn.Module) -> torch.Tensor:
++    base = getattr(mod, "base_layer", None)
++    return (base if base is not None else mod).weight
++
++
++# ---------------------------------------------------------------------------
++# probe
++# ---------------------------------------------------------------------------
++
++class TokenGradProbe:
++    """Hooks that record token-level factors (x_t, d_t) on probe steps only.
++
++    Usage inside the training loop (see the patched ``finetune_pion.py``)::
++
++        probe.begin_step(active=is_probe_step)       # before the first micro-batch forward
++        ... forward / backward (all micro-batches) ...
++        if probe.active: probe.snapshot_weights()   # right before optimizer.step()
++        optimizer.step()
++        metrics = probe.end_step()                  # right after optimizer.step()
++    """
++
++    def __init__(self, model: nn.Module, ctx: TokenTypeContext, *, layer_stride: int = 4,
++                 types: Iterable[int] = DEFAULT_TYPES, top_k: int = 16, max_rows: int = 8192,
++                 repr_spectra: bool = True, log_path: Optional[Path] = None,
++                 decay_of: Optional[Callable[[torch.Tensor], Optional[float]]] = None):
++        self.ctx = ctx
++        self.types = tuple(types)
++        self.top_k = top_k
++        self.max_rows = max_rows
++        self.log_path = Path(log_path) if log_path is not None else None
++        self.decay_of = decay_of
++        self.linears = select_llm_linears(model, layer_stride)
++        self.layers = select_decoder_layers(model, layer_stride) if repr_spectra else {}
++        self.active = False
++        self.step = None
++        self._x: Dict[str, List[torch.Tensor]] = {}
++        self._d: Dict[str, List[torch.Tensor]] = {}
++        self._t: Dict[str, List[torch.Tensor]] = {}
++        self._w0: Dict[str, torch.Tensor] = {}
++        self._repr: Dict[str, Dict[str, float]] = {}
++        self._handles = []
++        for name, mod in self.linears.items():
++            self._handles.append(mod.register_forward_hook(self._linear_hook(name)))
++        for name, mod in self.layers.items():
++            self._handles.append(mod.register_forward_hook(self._layer_hook(name)))
++        if not self.linears:
++            raise RuntimeError("TokenGradProbe found no LLM linear layers to probe")
++
++    # -- hooks ---------------------------------------------------------------
++    def _linear_hook(self, name: str):
++        def hook(_mod, inputs, output):
++            if not (self.active and torch.is_grad_enabled()):
++                return
++            x = inputs[0]
++            if x.dim() != 3 or not isinstance(output, torch.Tensor) or not output.requires_grad:
++                return
++            t = self.ctx.types_for(x.shape[0], x.shape[1])
++            if t is None:
++                return
++            keep = t.reshape(-1) >= 0
++            x2 = x.detach().reshape(-1, x.shape[-1])[keep]
++            t2 = t.reshape(-1)[keep]
++            # One slot per (micro-batch, forward).  Under gradient checkpointing the
++            # first forward runs without grad and is skipped above; the recompute
++            # is captured, so each micro-batch still yields exactly one slot.
++            slot = len(self._x.setdefault(name, []))
++            self._x[name].append(x2.to(torch.bfloat16))
++            self._t.setdefault(name, []).append(t2)
++
++            def grad_hook(g, name=name, slot=slot, keep=keep):
++                d2 = g.detach().reshape(-1, g.shape[-1])[keep].to(torch.bfloat16)
++                lst = self._d.setdefault(name, [])
++                while len(lst) <= slot:
++                    lst.append(None)
++                lst[slot] = d2
++            output.register_hook(grad_hook)
++        return hook
++
++    def _layer_hook(self, name: str):
++        @torch.no_grad()
++        def hook(_mod, _inputs, output):
++            if not (self.active and torch.is_grad_enabled()):
++                return
++            h = output[0] if isinstance(output, (tuple, list)) else output
++            if h.dim() != 3:
++                return
++            t = self.ctx.types_for(h.shape[0], h.shape[1])
++            if t is None or name in self._repr:
++                return
++            flat, tt = h.detach().reshape(-1, h.shape[-1]).float(), t.reshape(-1)
++            stats, means = {}, {}
++            for tau in (VISION, LANG, ACTION):
++                rows = flat[tt == tau]
++                if rows.shape[0] < 2:
++                    continue
++                if rows.shape[0] > self.max_rows:
++                    rows = rows[torch.randperm(rows.shape[0], device=rows.device)[: self.max_rows]]
++                means[tau] = rows.mean(0)
++                s = _svdvals(rows - means[tau])
++                key = TYPE_NAMES[tau]
++                stats[f"{key}/stable_rank"] = stable_rank(s)
++                stats[f"{key}/erank"] = erank(s)
++                stats[f"{key}/norm"] = float(rows.norm(dim=1).mean())
++            if LANG in means and VISION in means:
++                stats["lang_vision_mean_cos"] = float(torch.nn.functional.cosine_similarity(
++                    means[LANG], means[VISION], dim=0))
++            self._repr[name] = stats
++        return hook
++
++    # -- step protocol -----------------------------------------------------------
++    def begin_step(self, active: bool, step: Optional[int] = None) -> None:
++        self.active = bool(active)
++        self.step = step
++        self._x, self._d, self._t, self._w0, self._repr = {}, {}, {}, {}, {}
++
++    @torch.no_grad()
++    def snapshot_weights(self) -> None:
++        if not self.active:
++            return
++        for name, mod in self.linears.items():
++            self._w0[name] = _weight_of(mod).detach().float().clone()
++
++    @torch.no_grad()
++    def end_step(self) -> Dict[str, float]:
++        if not self.active:
++            return {}
++        metrics: Dict[str, float] = {}
++        per_type_acc: Dict[str, List[float]] = {}
++        for name, mod in self.linears.items():
++            if name not in self._x or name not in self._d or name not in self._w0:
++                continue
++            pairs = [(x, d, t) for x, d, t in zip(self._x[name], self._d[name], self._t[name]) if d is not None]
++            if not pairs:
++                continue
++            X = torch.cat([p[0] for p in pairs]).float()
++            D = torch.cat([p[1] for p in pairs]).float()
++            T = torch.cat([p[2] for p in pairs])
++            W1 = _weight_of(mod).detach().float()
++            U = self._w0[name] - W1                      # actual descent step (up to lr)
++            wd = self.decay_of(_weight_of(mod)) if self.decay_of is not None else None
++            if wd:
++                U = U - wd * self._w0[name]              # remove decoupled weight decay
++            G = D.T @ X
++            g2 = float((G * G).sum())
++            gu = float((G * U).sum())
++            u_svd = None
++            if self.top_k > 0:
++                uu, us, uvh = torch.linalg.svd(U, full_matrices=False)
++                k = min(self.top_k, us.numel())
++                u_svd = (uu[:, :k], uvh[:k])
++            short = _short(name)
++            e_tot = 0.0
++            rows = {}
++            for tau in self.types:
++                m = T == tau
++                if m.sum() == 0:
++                    continue
++                Gt = D[m].T @ X[m]
++                e = float((Gt * Gt).sum())
++                e_tot += e
++                rec = {
++                    "energy": e,
++                    "credit": float((Gt * G).sum()) / g2 if g2 > 0 else float("nan"),
++                    "budget": float((Gt * U).sum()) / gu if gu != 0 else float("nan"),
++                    "erank": erank(_svdvals(Gt)),
++                    "n_tokens": float(m.sum()),
++                }
++                if u_svd is not None and e > 0:
++                    L, R = u_svd
++                    proj = L.T @ Gt @ R.T
++                    rec["top_overlap"] = float((proj * proj).sum()) / e
++                rows[tau] = rec
++            for tau, rec in rows.items():
++                rec["energy"] = rec["energy"] / e_tot if e_tot > 0 else float("nan")
++                if rec["credit"] and not math.isnan(rec["credit"]) and abs(rec["credit"]) > 1e-8:
++                    rec["amplification"] = rec["budget"] / rec["credit"]
++                key = TYPE_NAMES[tau]
++                for k, v in rec.items():
++                    metrics[f"lang_probe/grad/{short}/{key}/{k}"] = v
++                    per_type_acc.setdefault(f"{key}/{k}", []).append(v)
++            metrics[f"lang_probe/grad/{short}/step_cos_sgd"] = gu / (math.sqrt(g2) * float(U.norm()) + 1e-12)
++        for k, vals in per_type_acc.items():
++            vals = [v for v in vals if not math.isnan(v)]
++            if vals:
++                metrics[f"lang_probe/grad_mean/{k}"] = sum(vals) / len(vals)
++        for name, stats in self._repr.items():
++            for k, v in stats.items():
++                metrics[f"lang_probe/repr/{_short(name)}/{k}"] = v
++        if self.log_path is not None and metrics:
++            self.log_path.parent.mkdir(parents=True, exist_ok=True)
++            with self.log_path.open("a") as f:
++                f.write(json.dumps({"step": self.step, **metrics}) + "\n")
++        self.active = False
++        self._x, self._d, self._t, self._w0, self._repr = {}, {}, {}, {}, {}
++        return metrics
++
++    def remove(self) -> None:
++        for h in self._handles:
++            h.remove()
++        self._handles = []
++
++
++def _short(name: str) -> str:
++    m = _LAYER_RE.search(name)
++    layer = m.group(1) if m else "x"
++    return f"L{layer}.{name.rsplit('.', 1)[-1]}"
+diff --git a/VLA/VLAAdapter/lang_spectral/optim_lang.py b/VLA/VLAAdapter/lang_spectral/optim_lang.py
+new file mode 100644
+index 0000000..e2965c8
+--- /dev/null
++++ b/VLA/VLAAdapter/lang_spectral/optim_lang.py
+@@ -0,0 +1,213 @@
++"""Q11 remedy: protect the language-input subspace from spectral whitening / high-pass.
++
++Idea
++----
++Pion's high-pass NS keeps dominant singular directions of the momentum M and
++drives the tail to 0.  If language tokens contribute weak, low-energy gradient
++directions inside the shared LLM weights (Q9 measures whether they do), the
++high-pass removes exactly those.  Muon, conversely, lifts them to the same
++magnitude as everything else.  LangGuard makes this choice explicit:
++
++    V   = top-r orthonormal basis of the *input* activations at language-token
++          positions for this layer (rows in R^{in}, tracked online, EMA'd)
++    M_L = (M V^T) V          component of the update acting on language inputs
++    M_R = M - M_L            everything else
++    O   = F_rest(M_R) + gamma * F_lang(M V^T) V
++
++    F_rest = high-pass NS (rest="pion")  or  Muon NS (rest="muon")
++    F_lang = NS                  (lang_mode="ns":      whiten inside the language subspace)
++           = X / ||X||_2         (lang_mode="linear":  keep its own spectrum -- a low-pass /
++                                                        pass-through, nothing suppressed)
++
++``gamma`` is the explicit "language budget".  ``gamma=0`` with rest="muon"
++is *not* identical to Muon (the language subspace is removed from the update);
++use ``lang_mode="off"`` for the exact Muon / Pion baseline inside the same code
++path.
++
++The step skeleton (sharding, async all_gather, scaling by
++``scale_factor * sqrt(max(out, in))``) is copied from ``pion_optim.muon`` so
++results are directly comparable to the paper's optimizers.
++
++Distributed note: every rank runs a full forward, so every rank's tracker has
++a (local-batch) basis for every layer; the rank that owns parameter p uses its
++own basis.  No extra communication.
++"""
++from __future__ import annotations
++
++from typing import Dict, Optional
++
++import torch
++import torch.distributed as dist
++import torch.nn as nn
++from torch import Tensor
++
++from pion_optim.muon import fast_newtonschulz, high_pass_ns
++
++from .grad_probe import select_llm_linears
++from .token_types import LANG, TokenTypeContext
++
++
++class LangSubspaceTracker:
++    """Online top-r basis of language-token inputs for each LLM linear layer.
++
++    Uses a frequent-directions style update: stack sqrt(beta)*S V (previous
++    sketch) with sqrt(1-beta)*X_lang/sqrt(n) (this step) and keep the top-r
++    right singular vectors.
++    """
++
++    def __init__(self, model: nn.Module, ctx: TokenTypeContext, *, rank: int = 32, beta: float = 0.9,
++                 max_rows: int = 1024, min_rows: int = 16, layer_stride: int = 1):
++        self.ctx = ctx
++        self.rank = int(rank)
++        self.beta = float(beta)
++        self.max_rows = int(max_rows)
++        self.min_rows = int(min_rows)
++        self.linears = select_llm_linears(model, layer_stride=layer_stride)
++        self._by_param: Dict[int, str] = {}
++        self._rows: Dict[str, list] = {}
++        self._V: Dict[str, Tensor] = {}
++        self._S: Dict[str, Tensor] = {}
++        self._handles = []
++        for name, mod in self.linears.items():
++            w = getattr(mod, "base_layer", mod).weight
++            self._by_param[id(w)] = name
++            self._handles.append(mod.register_forward_hook(self._hook(name)))
++
++    def _hook(self, name: str):
++        @torch.no_grad()
++        def hook(_mod, inputs, _output):
++            if not torch.is_grad_enabled():
++                return
++            x = inputs[0]
++            if x.dim() != 3:
++                return
++            t = self.ctx.types_for(x.shape[0], x.shape[1])
++            if t is None:
++                return
++            rows = x.detach().reshape(-1, x.shape[-1])[t.reshape(-1) == LANG]
++            if rows.numel():
++                self._rows.setdefault(name, []).append(rows.to(torch.bfloat16))
++        return hook
++
++    @torch.no_grad()
++    def update(self) -> None:
++        """Fold this step's language rows into each layer's basis. Call once per optimizer step, before step()."""
++        for name, chunks in self._rows.items():
++            X = torch.cat(chunks).float()
++            if X.shape[0] < self.min_rows:
++                continue
++            if X.shape[0] > self.max_rows:
++                X = X[torch.randperm(X.shape[0], device=X.device)[: self.max_rows]]
++            X = X * ((1.0 - self.beta) / X.shape[0]) ** 0.5
++            if name in self._V:
++                prev = (self.beta ** 0.5) * self._S[name][:, None] * self._V[name]
++                X = torch.cat([prev, X])
++            _, S, Vh = torch.linalg.svd(X, full_matrices=False)
++            r = min(self.rank, Vh.shape[0])
++            self._V[name], self._S[name] = Vh[:r].contiguous(), S[:r].contiguous()
++        self._rows = {}
++
++    def basis_for(self, p: Tensor) -> Optional[Tensor]:
++        name = self._by_param.get(id(p))
++        return None if name is None else self._V.get(name)
++
++    def remove(self) -> None:
++        for h in self._handles:
++            h.remove()
++        self._handles = []
++
++
++def lang_guard_direction(M: Tensor, V: Optional[Tensor], *, rest: str, lang_mode: str, gamma: float,
++                         promotion_steps: int, suppression_steps: int, ns_steps: int) -> Tensor:
++    """Update direction for one (out, in) matrix. Returns bf16 (out, in)."""
++    def f_rest(X: Tensor) -> Tensor:
++        if rest == "pion":
++            return high_pass_ns(X, promotion_steps, suppression_steps)
++        if rest == "muon":
++            return fast_newtonschulz(X, steps=ns_steps)
++        raise ValueError(f"unknown rest optimizer: {rest}")
++
++    if lang_mode == "off" or V is None:
++        return f_rest(M)
++    V = V.to(M.device, torch.float32)
++    Mf = M.float()
++    A = Mf @ V.T                      # (out, r): M restricted to the language input subspace
++    M_R = Mf - A @ V
++    O = f_rest(M_R).float()
++    if gamma != 0.0 and A.abs().sum() > 0:
++        if lang_mode == "ns":
++            O_L = fast_newtonschulz(A, steps=ns_steps).float() @ V
++        elif lang_mode == "linear":
++            O_L = (A / (torch.linalg.matrix_norm(A, ord=2) + 1e-7)) @ V
++        else:
++            raise ValueError(f"unknown lang_mode: {lang_mode}")
++        O = O + gamma * O_L
++    return O.to(torch.bfloat16)
++
++
++class LangGuard(torch.optim.Optimizer):
++    """Muon / Pion with a protected language-input subspace (see module docstring)."""
++
++    def __init__(self, params, tracker: LangSubspaceTracker, lr=0.02, weight_decay=0.01, momentum=0.95,
++                 nesterov=True, rest="muon", lang_mode="ns", gamma=0.5, promotion_steps=0, ns_steps=5,
++                 scale_factor=0.2, rank=None, world_size=None):
++        if (rank is None) or (world_size is None):
++            raise Exception("world_size and rank params required. For single-GPU use, pass rank=0 and world_size=1.")
++        self.rank, self.world_size, self.tracker = rank, world_size, tracker
++        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov, rest=rest,
++                        lang_mode=lang_mode, gamma=gamma, promotion_steps=promotion_steps, ns_steps=ns_steps,
++                        scale_factor=scale_factor)
++        params = [*params]
++        param_groups = []
++        for size in {p.numel() for p in params}:
++            b = torch.empty(world_size, size, dtype=torch.bfloat16, device="cuda")
++            param_groups.append(dict(params=[p for p in params if p.numel() == size], update_buffer=b,
++                                     update_buffer_views=[b[i] for i in range(world_size)]))
++        super().__init__(param_groups, defaults)
++
++    @torch.no_grad()
++    def step(self):
++        for group in self.param_groups:
++            update_buffer: Tensor = group["update_buffer"]
++            views: list = group["update_buffer_views"]
++            params: list = group["params"]
++            handle, params_world = None, None
++            kp = group["promotion_steps"]
++            ks = max(0, group["ns_steps"] - kp)
++
++            def update_prev():
++                handle.wait()
++                for p_world, g_world in zip(params_world, views):
++                    p_world.mul_(1 - group["lr"] * group["weight_decay"])
++                    p_world.add_(g_world.view_as(p_world),
++                                 alpha=-group["lr"] * group["scale_factor"] * max(p_world.size(-2), p_world.size(-1)) ** 0.5)
++
++            for base_i in range(len(params))[:: self.world_size]:
++                if base_i + self.rank < len(params):
++                    p = params[base_i + self.rank]
++                    g = p.grad
++                    if g is None:
++                        g = views[self.rank]
++                        g.zero_()
++                    else:
++                        state = self.state[p]
++                        if "momentum_buffer" not in state:
++                            state["momentum_buffer"] = torch.zeros_like(g)
++                        buf: Tensor = state["momentum_buffer"]
++                        buf.lerp_(g, 1 - group["momentum"])
++                        g = g.lerp_(buf, group["momentum"]) if group["nesterov"] else buf
++                        if g.ndim != 2:
++                            raise ValueError("LangGuard expects 2D (out, in) weights")
++                        g = lang_guard_direction(
++                            g, self.tracker.basis_for(p), rest=group["rest"], lang_mode=group["lang_mode"],
++                            gamma=group["gamma"], promotion_steps=kp, suppression_steps=ks,
++                            ns_steps=group["ns_steps"]).flatten()
++                else:
++                    g = views[self.rank]
++                    g.zero_()
++                if base_i > 0:
++                    update_prev()
++                handle = dist.all_gather_into_tensor(update_buffer, g, async_op=True)
++                params_world = params[base_i: base_i + self.world_size]
++            if params_world is not None:
++                update_prev()
+diff --git a/VLA/VLAAdapter/lang_spectral/token_types.py b/VLA/VLAAdapter/lang_spectral/token_types.py
+new file mode 100644
+index 0000000..417b869
+--- /dev/null
++++ b/VLA/VLAAdapter/lang_spectral/token_types.py
+@@ -0,0 +1,92 @@
++"""Token-type labels for the VLA-Adapter LLM sequence.
++
++VLA-Adapter (Prismatic + Qwen2.5-0.5B) feeds the LLM this sequence
++(see ``PrismaticForConditionalGeneration._build_multimodal_attention``)::
++
++    [BOS] [P vision patches] [input_ids[1:] = prompt text ... action-query slots ... stop]
++
++so a multimodal position ``m`` maps to ``input_ids`` index ``m - P`` for
++``m >= 1 + P``.  Proprio is *not* inserted into the LLM sequence during
++training (it goes to the action head), so normally ``P == NUM_PATCHES``.
++``P`` is inferred from the runtime sequence length, so any extra prefix tokens
++beyond ``num_vision`` are labelled ``PROPRIO``.
++
++Action-query slots are found with the same helper the model uses to replace
++them (``_process_action_masks`` on the *unshifted* labels).
++"""
++from __future__ import annotations
++
++from typing import Callable, Optional
++
++import torch
++
++PAD, OTHER, VISION, PROPRIO, LANG, ACTION = -1, 0, 1, 2, 3, 4
++TYPE_NAMES = {VISION: "vision", PROPRIO: "proprio", LANG: "lang", ACTION: "action", OTHER: "other"}
++IGNORE_INDEX = -100
++
++
++def build_token_types(
++    input_ids: torch.Tensor,
++    labels: torch.Tensor,
++    attention_mask: Optional[torch.Tensor],
++    mm_len: int,
++    num_vision: int,
++    action_mask_fn: Callable[[torch.Tensor], torch.Tensor],
++) -> torch.Tensor:
++    """Return a (B, mm_len) long tensor of token-type ids."""
++    B, T = input_ids.shape
++    P = mm_len - T
++    if P < 0 or P < num_vision:
++        raise ValueError(f"sequence length {mm_len} inconsistent with T={T}, num_vision={num_vision}")
++    device = input_ids.device
++
++    text = torch.full((B, T), LANG, dtype=torch.long, device=device)
++    labels = labels.to(device)
++    text[labels != IGNORE_INDEX] = OTHER          # stop token and anything else that is supervised
++    text[action_mask_fn(labels).bool()] = ACTION   # action-query slots (replaced by learned queries)
++    text[:, 0] = OTHER                             # BOS
++    if attention_mask is not None:
++        text[attention_mask.to(device) == 0] = PAD
++
++    types = torch.full((B, mm_len), OTHER, dtype=torch.long, device=device)
++    types[:, 0] = text[:, 0]
++    types[:, 1 : 1 + num_vision] = VISION
++    if P > num_vision:
++        types[:, 1 + num_vision : 1 + P] = PROPRIO
++    types[:, 1 + P :] = text[:, 1:]
++    return types
++
++
++class TokenTypeContext:
++    """Holds the current batch so forward hooks can label any LLM-length tensor.
++
++    Call :meth:`set_batch` before each forward pass.  :meth:`types_for` returns
++    ``None`` for tensors whose sequence length is not an LLM sequence (e.g.
++    vision-tower activations), so hooks can skip them.
++    """
++
++    def __init__(self, num_vision: int, action_mask_fn: Callable[[torch.Tensor], torch.Tensor]):
++        self.num_vision = int(num_vision)
++        self.action_mask_fn = action_mask_fn
++        self._batch = None
++        self._cache: dict[int, torch.Tensor] = {}
++
++    def set_batch(self, batch, device) -> None:
++        self._batch = (
++            batch["input_ids"].to(device),
++            batch["labels"].to(device),
++            batch.get("attention_mask").to(device) if batch.get("attention_mask") is not None else None,
++        )
++        self._cache = {}
++
++    def types_for(self, batch_size: int, seq_len: int) -> Optional[torch.Tensor]:
++        if self._batch is None:
++            return None
++        input_ids, labels, attention_mask = self._batch
++        if input_ids.shape[0] != batch_size or seq_len < input_ids.shape[1] + self.num_vision:
++            return None
++        if seq_len not in self._cache:
++            self._cache[seq_len] = build_token_types(
++                input_ids, labels, attention_mask, seq_len, self.num_vision, self.action_mask_fn
++            )
++        return self._cache[seq_len]
+diff --git a/VLA/VLAAdapter/scripts/eval_lang_modes.sh b/VLA/VLAAdapter/scripts/eval_lang_modes.sh
+new file mode 100755
+index 0000000..de2faac
+--- /dev/null
++++ b/VLA/VLAAdapter/scripts/eval_lang_modes.sh
+@@ -0,0 +1,32 @@
++#!/usr/bin/env bash
++# Q8 readout: evaluate one checkpoint under four instruction modes.
++#
++#   CKPT=outputs/lang_matrix/<run>--15000_chkpt SUITE=libero_goal bash scripts/eval_lang_modes.sh
++#
++# On LIBERO-Goal (one shared scene) the useful numbers are
++#   SR_orig                 task success with the correct instruction
++#   SR_other                success of the *env's* task when the policy is given another task's
++#                           instruction -- a language-following policy should FAIL here, so this is
++#                           the vision-shortcut rate
++#   SR_empty, SR_shuffle    no instruction / scrambled word order
++#   LRI = SR_orig - SR_other   language-reliance index
++# On Object / Spatial expect LRI ~ 0 for every optimizer (the layout decides the task).
++
++set -euo pipefail
++export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
++ckpt=${CKPT:?set CKPT=<checkpoint dir>}
++suite=${SUITE:-libero_goal}
++trials=${TRIALS:-50}
++modes=${MODES:-"orig other empty shuffle"}
++note=${NOTE:-$(basename "${ckpt}")}
++
++for mode in ${modes}; do
++  CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} \
++  python experiments/robot/libero/run_libero_eval.py \
++    --pretrained_checkpoint "${ckpt}" \
++    --task_suite_name "${suite}" \
++    --use_proprio True --num_images_in_input 2 --use_film False --use_pro_version True \
++    --num_trials_per_task "${trials}" \
++    --instruction_mode "${mode}" --instruction_shift 1 \
++    --run_id_note "${note}"
++done
+diff --git a/VLA/VLAAdapter/scripts/run_lang_matrix.sh b/VLA/VLAAdapter/scripts/run_lang_matrix.sh
+new file mode 100755
+index 0000000..f9d8f71
+--- /dev/null
++++ b/VLA/VLAAdapter/scripts/run_lang_matrix.sh
+@@ -0,0 +1,98 @@
++#!/usr/bin/env bash
++# lang_spectral experiment matrix for VLA-Adapter (Q8/Q9/Q11).
++#
++# One arm per call:   ARM=<arm> bash scripts/run_lang_matrix.sh
++#
++# Arms (V / L / A optimizers; everything else identical to scripts/run_pion.sh):
++#   adamw        AdamW        / AdamW               / AdamW         (O=AdamW, as run_adamw.sh)
++#   muon         Muon         / Muon                / Muon
++#   pion         Muon         / Muon                / DefaultPion   (paper recipe)
++#   pion_L       Muon         / DefaultPion         / DefaultPion   (high-pass on the LLM too)
++#   lg_muon      Muon         / LangGuardMuon       / DefaultPion   (protected language subspace)
++#   lg_pion      Muon         / LangGuardPion       / DefaultPion
++#   lg_off       Muon         / LangGuardMuon(off)  / DefaultPion   (same code path as `pion`; sanity check)
++#
++# Default suite is LIBERO-Goal: its 10 tasks share one scene, so the policy
++# cannot succeed without reading the instruction.  Object/Spatial are the
++# "language-free" control (one layout per task).
++#
++# The probe (Q9/Q11) runs on every arm; it is read-only and adds ~1 SVD sweep
++# every LANG_PROBE_EVERY steps on rank 0.
++
++set -euo pipefail
++export PYTHONPATH="$(pwd):${PYTHONPATH:-}"
++
++arm=${ARM:?set ARM=adamw|muon|pion|pion_L|lg_muon|lg_pion|lg_off}
++current_time=$(date +%m%d-%H%M%S)
++data_name=${DATA_NAME:-libero_goal_no_noops}
++max_steps=${MAX_STEPS:-15000}
++save_freq=${SAVE_FREQ:-2500}
++batch_size=${BATCH_SIZE:-8}
++lr=${LR:-1e-4}
++wd=${WD:-1e-2}
++seed_note=${SEED_NOTE:-s0}
++nproc=${NPROC:-8}
++probe_every=${LANG_PROBE_EVERY:-100}
++probe_stride=${LANG_PROBE_STRIDE:-4}
++lg_gamma=${LG_GAMMA:-0.5}
++lg_rank=${LG_RANK:-32}
++lg_mode=${LG_MODE:-ns}
++promotion_steps=${PROMOTION_STEPS:-0}   # Pion k_p (0 = pure suppression, paper's VLA default)
++
++V=Muon; L=Muon; A=DefaultPion; O=Muon
++case "${arm}" in
++  adamw)   V=AdamW; L=AdamW; A=AdamW; O=AdamW ;;
++  muon)    V=Muon;  L=Muon;  A=Muon ;;
++  pion)    ;;
++  pion_L)  L=DefaultPion ;;
++  lg_muon) L=LangGuardMuon ;;
++  lg_pion) L=LangGuardPion ;;
++  lg_off)  L=LangGuardMuon; lg_mode=off ;;
++  *) echo "unknown ARM=${arm}" >&2; exit 2 ;;
++esac
++
++out_dir=${OUT_DIR:-outputs/lang_matrix}
++run_id_note=${RUN_ID_NOTE:-${arm}-kp${promotion_steps}-${data_name}-${seed_note}-${current_time}}
++log_file=logs/${run_id_note}.log
++mkdir -p "${out_dir}" logs
++
++CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7} \
++torchrun --standalone --nnodes 1 --nproc-per-node "${nproc}" vla-scripts/finetune_pion.py \
++  --vlm_path pretrained_models/prism-qwen25-extra-dinosiglip-224px-0_5b \
++  --config_file_path pretrained_models/configs \
++  --data_root_dir data/libero \
++  --dataset_name "${data_name}" \
++  --run_root_dir "${out_dir}" \
++  --use_film False \
++  --num_images_in_input 2 \
++  --use_proprio True \
++  --use_lora False \
++  --use_fz True \
++  --use_minivlm True \
++  --image_aug True \
++  --num_steps_before_decay 100000 \
++  --max_steps "${max_steps}" \
++  --save_freq "${save_freq}" \
++  --save_latest_checkpoint_only False \
++  --merge_lora_during_training True \
++  --batch_size "${batch_size}" \
++  --grad_accumulation_steps 1 \
++  --learning_rate "${lr}" \
++  --weight_decay "${wd}" \
++  --lr_ratio 1.0 \
++  --lora_rank 64 \
++  --use_pro_version True \
++  --wandb_project "${data_name}-lang" \
++  --run_id_note "${run_id_note}" \
++  --optimizer_V "${V}" \
++  --optimizer_L "${L}" \
++  --optimizer_A "${A}" \
++  --optimizer_O "${O}" \
++  --pion_promotion_steps "${promotion_steps}" \
++  --pion_ns_steps 5 \
++  --lang_probe_every "${probe_every}" \
++  --lang_probe_layer_stride "${probe_stride}" \
++  --lang_guard_mode "${lg_mode}" \
++  --lang_guard_gamma "${lg_gamma}" \
++  --lang_guard_rank "${lg_rank}" \
++  2>&1 | tee "${log_file}"
+diff --git a/VLA/VLAAdapter/vla-scripts/finetune_pion.py b/VLA/VLAAdapter/vla-scripts/finetune_pion.py
+index e4c98ab..e9fa406 100644
+--- a/VLA/VLAAdapter/vla-scripts/finetune_pion.py
++++ b/VLA/VLAAdapter/vla-scripts/finetune_pion.py
+@@ -60,6 +60,8 @@ from prismatic.models import load, load_vla
+ 
+ # Fan
+ from pion_optim import Muon, LowRankMuon, DefaultPion
++from lang_spectral import TokenGradProbe, TokenTypeContext
++from lang_spectral.optim_lang import LangGuard, LangSubspaceTracker
+ 
+ # Sane Defaults
+ os.environ["TOKENIZERS_PARALLELISM"] = "false"
+@@ -145,11 +147,23 @@ class FinetuneConfig:
+ 
+     # per-modality optimizer for params with ndim>=2
+     # choices: "Muon" / "DefaultPion" / "LowRankMuon" / "AdamW"
++    #          / "LangGuardMuon" / "LangGuardPion"  (lang_spectral; only meaningful for L)
+     optimizer_V: str = "Muon"
+     optimizer_L: str = "Muon"
+     optimizer_A: str = "Muon"
+     optimizer_O: str = "Muon"   # other / unknown
+ 
++    # lang_spectral: Q9/Q11 probe (0 disables)
++    lang_probe_every: int = 0                        # probe every N gradient steps (also probes step 0)
++    lang_probe_layer_stride: int = 4                 # probe every k-th LLM decoder layer
++    lang_probe_top_k: int = 16                       # top-k subspace of the actual update for `top_overlap`
++
++    # lang_spectral: LangGuard optimizer (used when optimizer_L is LangGuardMuon / LangGuardPion)
++    lang_guard_mode: str = "ns"                      # "ns" | "linear" | "off"
++    lang_guard_gamma: float = 0.5                    # language budget
++    lang_guard_rank: int = 32                        # rank of the tracked language-input subspace
++    lang_guard_beta: float = 0.9                     # EMA factor of the subspace sketch
++
+ 
+ def remove_ddp_in_checkpoint(state_dict) -> dict:
+     """
+@@ -209,6 +223,8 @@ def get_run_id(cfg) -> str:
+             f"+pion_promotion_steps-{cfg.pion_promotion_steps}"
+             f"+pion_ns_steps-{cfg.pion_ns_steps}"
+         )
++        if cfg.optimizer_L.startswith("LangGuard"):
++            run_id += f"+lg-{cfg.lang_guard_mode}-g{cfg.lang_guard_gamma}-r{cfg.lang_guard_rank}"
+         if cfg.use_fz:
+             run_id += f"+frozen+dropout-{cfg.lora_dropout}"
+         if cfg.use_lora:
+@@ -928,6 +944,18 @@ def finetune(cfg: FinetuneConfig) -> None:
+     NUM_PATCHES = vla.module.vision_backbone.get_num_patches() * vla.module.vision_backbone.get_num_images_in_input()
+     # If we have proprio inputs, a single proprio embedding is appended to the end of the vision patch embeddings
+ 
++    # ===== lang_spectral: token-type context shared by the probe and LangGuard =====
++    def _all_action_mask(labels):
++        # Same positions the model replaces with action queries (unshifted labels).
++        return get_current_action_mask(labels) | get_next_actions_mask(labels)
++
++    token_ctx = TokenTypeContext(num_vision=NUM_PATCHES, action_mask_fn=_all_action_mask)
++    uses_lang_guard = str(cfg.optimizer_L).startswith("LangGuard")
++    lang_tracker = (
++        LangSubspaceTracker(vla.module, token_ctx, rank=cfg.lang_guard_rank, beta=cfg.lang_guard_beta)
++        if uses_lang_guard else None
++    )
++
+     # Instantiate optimizer
+     # ===== 收集需要训练的 (name, param) =====
+     trainable_named = [(f"vla.{name}", p) for name, p in vla.named_parameters() if p.requires_grad]
+@@ -1001,6 +1029,7 @@ def finetune(cfg: FinetuneConfig) -> None:
+         ("V", "LowRankMuon"): [], ("L", "LowRankMuon"): [], ("A", "LowRankMuon"): [], ("O", "LowRankMuon"): [],
+         ("V", "DefaultPion"): [], ("L", "DefaultPion"): [], ("A", "DefaultPion"): [], ("O", "DefaultPion"): [],
+         ("V", "AdamW_main"): [], ("L", "AdamW_main"): [], ("A", "AdamW_main"): [], ("O", "AdamW_main"): [],
++        ("L", "LangGuardMuon"): [], ("L", "LangGuardPion"): [],   # lang_spectral
+         ("*", "AdamW_aux"): [],   # 1D / excluded / special
+     }
+ 
+@@ -1020,6 +1049,10 @@ def finetune(cfg: FinetuneConfig) -> None:
+             buckets[(mod, "DefaultPion")].append((name, p))
+         elif chosen == "AdamW":
+             buckets[(mod, "AdamW_main")].append((name, p))
++        elif chosen in ("LangGuardMuon", "LangGuardPion"):
++            if mod != "L":
++                raise ValueError(f"{chosen} is only defined for the LLM (L) group, got mod={mod}")
++            buckets[(mod, chosen)].append((name, p))
+         else:
+             raise ValueError(f"Unknown per-modality optimizer for mod={mod}: {chosen} (name={name})")
+ 
+@@ -1050,7 +1083,7 @@ def finetune(cfg: FinetuneConfig) -> None:
+ 
+         # 1. 遍历主要模态的 buckets
+         for mod in ["V", "L", "A", "O"]:
+-            methods = ["Muon", "LowRankMuon", "DefaultPion", "AdamW_main"]
++            methods = ["Muon", "LowRankMuon", "DefaultPion", "AdamW_main", "LangGuardMuon", "LangGuardPion"]
+ 
+             for method in methods:
+                 key = (mod, method)
+@@ -1124,6 +1157,23 @@ def finetune(cfg: FinetuneConfig) -> None:
+             ns_steps=getattr(cfg, "pion_ns_steps", 5)
+         ))
+ 
++    # 4) LangGuard (lang_spectral): Muon / Pion with a protected language-input subspace
++    for method, rest in (("LangGuardMuon", "muon"), ("LangGuardPion", "pion")):
++        named_list = buckets[("L", method)]
++        if len(named_list) == 0: continue
++        optimizers.append(LangGuard(
++            [p for _, p in named_list],
++            tracker=lang_tracker,
++            lr=cfg.learning_rate,
++            weight_decay=cfg.weight_decay,
++            rank=rank, world_size=world_size,
++            rest=rest,
++            lang_mode=cfg.lang_guard_mode,
++            gamma=cfg.lang_guard_gamma,
++            promotion_steps=getattr(cfg, "pion_promotion_steps", 1),
++            ns_steps=getattr(cfg, "pion_ns_steps", 5),
++        ))
++
+     # 5) AdamW_main
+     adamw_main_named = []
+     for mod in ["V", "L", "A", "O"]:
+@@ -1156,6 +1206,24 @@ def finetune(cfg: FinetuneConfig) -> None:
+     # 记录初始 lr
+     original_lr = optimizers[0].param_groups[0]["lr"]
+ 
++    # ===== lang_spectral: Q9/Q11 probe (rank 0 only) =====
++    _group_of = {id(p): g for opt in optimizers for g in opt.param_groups for p in g["params"]}
++
++    def _decay_of(p):
++        g = _group_of.get(id(p))
++        return None if g is None else g["lr"] * g.get("weight_decay", 0.0)
++
++    lang_probe = None
++    if cfg.lang_probe_every > 0 and distributed_state.is_main_process:
++        lang_probe = TokenGradProbe(
++            vla.module, token_ctx,
++            layer_stride=cfg.lang_probe_layer_stride,
++            top_k=cfg.lang_probe_top_k,
++            log_path=run_dir / "lang_probe.jsonl",
++            decay_of=_decay_of,
++        )
++        print(f"# lang_probe: {len(lang_probe.linears)} linears, {len(lang_probe.layers)} decoder layers")
++
+     action_tokenizer = ActionTokenizer(processor.tokenizer)
+ 
+     # Load Fine-tuning Dataset =>> note that we use an RLDS-formatted dataset following Open X-Embodiment by default.
+@@ -1250,6 +1318,13 @@ def finetune(cfg: FinetuneConfig) -> None:
+         for batch_idx, batch in enumerate(dataloader):
+             # Compute training metrics and loss
+             compute_diffusion_l1 = (cfg.use_l1_regression and batch_idx % cfg.diffusion_sample_freq == 0) or (cfg.use_diffusion and batch_idx % cfg.diffusion_sample_freq == 0)
++
++            # lang_spectral: label this batch's tokens; open a probe step at the first micro-batch
++            token_ctx.set_batch(batch, device_id)
++            if lang_probe is not None and batch_idx % cfg.grad_accumulation_steps == 0:
++                _gstep = batch_idx // cfg.grad_accumulation_steps
++                lang_probe.begin_step(active=(_gstep % cfg.lang_probe_every == 0), step=_gstep)
++
+             loss, metrics = run_forward_pass(
+                 vla=vla,
+                 action_head=action_head,
+@@ -1303,9 +1378,17 @@ def finetune(cfg: FinetuneConfig) -> None:
+ 
+             # Optimizer and LR scheduler step
+             if (batch_idx + 1) % cfg.grad_accumulation_steps == 0:
++                if lang_tracker is not None:
++                    lang_tracker.update()
++                if lang_probe is not None and lang_probe.active:
++                    lang_probe.snapshot_weights()
+                 for opt in optimizers:
+                     opt.step()
+                     opt.zero_grad(set_to_none=True)
++                if lang_probe is not None and lang_probe.active:
++                    probe_metrics = lang_probe.end_step()
++                    if probe_metrics:
++                        wandb.log(probe_metrics, step=log_step)
+ 
+                 for sch in schedulers:
+                     sch.step()

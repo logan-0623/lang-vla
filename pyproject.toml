@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langeval"
+version = "0.1.0"
+description = "Language-reliance evaluation and interpretability for VLA policies on LIBERO"
+requires-python = ">=3.10"
+# Deliberately unpinned and minimal: installed into the model envs, which pin torch / numpy themselves.
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["langeval", "langeval.adapters"]

@@ -1,0 +1,36 @@
+From f39b7fd70882b2fb3f810d933be16e72771de2c2 Mon Sep 17 00:00:00 2001
+From: logan-623 <2579764740@qq.com>
+Date: Wed, 14 Oct 2026 13:08:02 -0400
+Subject: [PATCH 2/2] run_libero_eval: add --task_ids so several processes can
+ share a GPU
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py b/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
+index 5610fbb..2a5beaa 100644
+--- a/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
++++ b/VLA/VLAAdapter/experiments/robot/libero/run_libero_eval.py
+@@ -130,6 +130,7 @@ class GenerateConfig:
+     #   shuffle -- the task's own words in a fixed random order (keeps the bag of words)
+     instruction_mode: str = "orig"
+     instruction_shift: int = 1
++    task_ids: str = ""                               # comma-separated subset of task ids ("" = all); lets several processes share a GPU
+ 
+     # fmt: on
+     save_version: str = "vla-adapter"                # version of 
+@@ -537,7 +538,8 @@ def eval_libero(cfg: GenerateConfig) -> float:
+ 
+     # Start evaluation
+     total_episodes, total_successes = 0, 0
+-    for task_id in tqdm.tqdm(range(num_tasks)):
++    task_ids = [int(t) for t in cfg.task_ids.split(",")] if cfg.task_ids else range(num_tasks)
++    for task_id in tqdm.tqdm(task_ids):
+         total_episodes, total_successes = run_task(
+             cfg,
+             task_suite,
+-- 
+2.55.0
+

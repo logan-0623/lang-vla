@@ -1,0 +1,89 @@
+From 1fd4f60bbb1d6116ac57a83d91063ca1f037ae0d Mon Sep 17 00:00:00 2001
+From: logan-623 <2579764740@qq.com>
+Date: Sat, 10 Oct 2026 15:37:27 -0400
+Subject: [PATCH 1/2] finetune_pion: add --seed (TF seed offset by rank); fall
+ back to SDPA when flash-attn is unavailable
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ VLA/VLAAdapter/vla-scripts/finetune_pion.py | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/VLA/VLAAdapter/vla-scripts/finetune_pion.py b/VLA/VLAAdapter/vla-scripts/finetune_pion.py
+index e9fa406..ce81648 100644
+--- a/VLA/VLAAdapter/vla-scripts/finetune_pion.py
++++ b/VLA/VLAAdapter/vla-scripts/finetune_pion.py
+@@ -25,8 +25,11 @@ from torch.optim.lr_scheduler import MultiStepLR, CosineAnnealingLR
+ from torch.utils.data import DataLoader
+ from transformers import AutoConfig, AutoImageProcessor, AutoModelForVision2Seq, AutoProcessor
+ from transformers.modeling_outputs import CausalLMOutputWithPast
++from transformers.utils import is_flash_attn_2_available
+ import wandb
++import tensorflow as tf
+ 
++from experiments.robot.robot_utils import set_seed_everywhere
+ from experiments.robot.openvla_utils import (
+     check_model_logic_mismatch,
+     model_is_on_hf_hub,
+@@ -57,6 +60,7 @@ from prismatic.vla.constants import (
+ from prismatic.vla.datasets import RLDSDataset, RLDSBatchTransform
+ from prismatic.vla.datasets.rlds.utils.data_utils import save_dataset_statistics
+ from prismatic.models import load, load_vla
++from prismatic.models.materialize import LLM_BACKBONES
+ 
+ # Fan
+ from pion_optim import Muon, LowRankMuon, DefaultPion
+@@ -118,6 +122,9 @@ class FinetuneConfig:
+     # Full Finetune
+     use_fz: bool = False                             # If True, uses LoRA fine-tuning
+ 
++    # Reproducibility
++    seed: int = 7                                    # torch / numpy / random get `seed`; TF gets `seed + rank`
++
+     # Logging
+     wandb_entity: str = "your-wandb-entity"          # Name of WandB entity
+     wandb_project: str = "your-wandb-project"        # Name of WandB project
+@@ -231,6 +238,7 @@ def get_run_id(cfg) -> str:
+             run_id += f"+lora-r{cfg.lora_rank}+dropout-{cfg.lora_dropout}"
+         if cfg.image_aug:
+             run_id += "--image_aug"
++        run_id += f"+s{cfg.seed}"
+         if cfg.run_id_note is not None:
+             run_id += f"--{cfg.run_id_note}"
+     return run_id
+@@ -770,6 +778,11 @@ def finetune(cfg: FinetuneConfig) -> None:
+     torch.cuda.set_device(device_id)
+     torch.cuda.empty_cache()
+ 
++    # The RLDS pipeline is not sharded by rank: each rank reads the full dataset and shuffles it itself,
++    # so an equal TF seed on every rank would feed all ranks identical batches. Offset it by rank.
++    set_seed_everywhere(cfg.seed)
++    tf.random.set_seed(cfg.seed + distributed_state.process_index)
++
+     # Initialize wandb logging
+     if distributed_state.is_main_process:
+         # wandb.init(project=cfg.wandb_project, name=f"ft+{run_id}", mode="offline")
+@@ -821,6 +834,12 @@ def finetune(cfg: FinetuneConfig) -> None:
+ 
+     if cfg.use_minivlm:
+         hf_token = ''
++        # The Prismatic VLM loaded here is only a weight source (its state dict is copied into `vla` below),
++        # but its LLM hard-codes flash-attn and fails to load without it. Fall back to SDPA in that case.
++        if not is_flash_attn_2_available():
++            print("WARNING: flash-attn unavailable; loading the source VLM's LLM with SDPA")
++            for entry in LLM_BACKBONES.values():
++                entry["kwargs"]["use_flash_attention_2"] = False
+         if 'prism-qwen25-extra-dinosiglip-224px-0_5b' in cfg.vlm_path:
+             
+             vlm = load(cfg.vlm_path, hf_token=hf_token, load_for_training=True)
+@@ -859,6 +878,7 @@ def finetune(cfg: FinetuneConfig) -> None:
+     
+         missing_keys, unexpected_keys = vla.load_state_dict(RAW_STATE_DICT, strict=False)
+         del old_state_dict
++        print(f"Trained LLM attention implementation: {vla.language_model.config._attn_implementation}")
+ 
+     else:
+         RAW_STATE_DICT ={}
+-- 
+2.55.0
+
