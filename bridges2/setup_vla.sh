@@ -35,8 +35,9 @@ pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.5.
 pip install -e "$PARA" --config-settings editable_mode=compat
 pip install -r "$VLAA/experiments/robot/libero/libero_requirements.txt"
 pip install "numpy<2" "opencv-python<4.11" pytest scikit-learn scipy pandas
-# tensorflow-metadata >=1.17 is generated with protobuf 5 (google.protobuf.runtime_version); TF 2.15 needs protobuf <5.
-pip install "tensorflow-metadata<1.17"
+# tensorflow-metadata >=1.17 needs protobuf 5 (google.protobuf.runtime_version), TF 2.15 needs <5; pinning it
+# downgrades protobuf, which recent wandb no longer supports (ImportError on wandb_telemetry_pb2.Imports).
+pip install "tensorflow-metadata<1.17" "wandb<0.18"
 pip install -e "$LANGVLA_ROOT"   # langeval
 
 # LIBERO prompts via input() when its config is missing: write it up front.
