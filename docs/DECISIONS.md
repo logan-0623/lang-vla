@@ -84,3 +84,11 @@ One entry per decision: what was decided, why, and what it affects.
 
 - GitHub `logan-0623/lang-vla` does not contain `Pion/`, which has its own git history. Our changes live as patches in `patches/`; `scripts/setup_pion.sh` clones upstream 8796501 and applies them. Locally verified: the rebuilt tree is file-for-file identical to the local `Pion/`.
 - After a new Pion commit, run `git -C Pion format-patch <last exported commit>..HEAD -o patches/` and commit the new patch.
+
+## 2026-10-15 Bridges-2 smoke results (job 49250616)
+
+- `vla` env needs three pins on top of the upstream lists (now in `setup_vla.sh`): `tensorflow-metadata<1.17`, `wandb<0.18` (protobuf 5 vs TF 2.15) and `mujoco==2.3.7` (robosuite 1.4 asserts fail on mujoco 3.x).
+- **Attention implementation on the eval path is `sdpa` for both VLA-Adapter and OFT**, as predicted in "Fall back to SDPA" above; flash-attn is never used at eval.
+- VLA-Adapter LIBERO-Goal-Pro, 1 trial x 10 tasks: 9/10 success. OFT Goal forward 15.0 GiB peak, VLA-Adapter 3.5 GiB.
+- pi0.5 loads its tokenizer from the gated `google/paligemma-3b-pt-224`: requires HF license acceptance + login (`download_assets.sh`).
+- `MUJOCO_GL=egl` makes robosuite hang at import on login nodes (no GPU): import tests must run inside a GPU job.
