@@ -38,6 +38,8 @@ pip install "numpy<2" "opencv-python<4.11" pytest scikit-learn scipy pandas
 # tensorflow-metadata >=1.17 needs protobuf 5 (google.protobuf.runtime_version), TF 2.15 needs <5; pinning it
 # downgrades protobuf, which recent wandb no longer supports (ImportError on wandb_telemetry_pb2.Imports).
 pip install "tensorflow-metadata<1.17" "wandb<0.18"
+# robosuite 1.4.x asserts joint types against mujoco enums, which fails on mujoco 3.x (get_joint_qpos_addr).
+pip install mujoco==2.3.7
 pip install -e "$LANGVLA_ROOT"   # langeval
 
 # LIBERO prompts via input() when its config is missing: write it up front.
