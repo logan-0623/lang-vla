@@ -11,6 +11,11 @@ dl VLA-Adapter/LIBERO-Goal-Pro                                  2ae84b8275a0c35c
 dl moojink/openvla-7b-oft-finetuned-libero-goal                 c2d0f9fbbd82674683b397ff923168a12f6a307b --exclude "lora_adapter/*"
 dl moojink/openvla-7b-oft-finetuned-libero-spatial-object-goal-10 638918f3d1c2e43a39a8a20772bdb8b91835e4b7 --exclude "lora_adapter/*"
 dl lerobot/pi05_libero_finetuned_v044                           7152f13e34c6c115d808aea0e5d08aca74eac14b
+# pi0.5's tokenizer is fetched by name at load time from a GATED repo: accept the license at
+# https://huggingface.co/google/paligemma-3b-pt-224 and run `huggingface-cli login` first.
+# Cached under $HF_HOME (on $STORE), which compute nodes see.
+huggingface-cli download google/paligemma-3b-pt-224 --quiet --include "*.json" "tokenizer.model" \
+  || echo "WARNING: PaliGemma tokenizer not downloaded (gated): pi0.5 evaluation will fail"
 # H≈0 controls (LIBERO-Spatial)
 dl VLA-Adapter/LIBERO-Spatial-Pro                               cb023c6771fc62ea729d218f09ac0583c14f59d4
 dl moojink/openvla-7b-oft-finetuned-libero-spatial              6d0231af0e48c5985f1ff86908f4674b84bc049b --exclude "lora_adapter/*"
