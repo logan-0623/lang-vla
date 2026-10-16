@@ -7,8 +7,11 @@
    and classify the outcome (langeval.phase.classify_outcome) and the executed goal (langeval.goal_matrix).
 
 The source x continuation design separates "the paraphrase produced a worse grasp" from "the paraphrase breaks
-post-grasp control". The first branch is replayed twice to check that restoring a state reproduces the
-trajectory exactly; without that, no E3 conclusion holds, so the script stops.
+post-grasp control". Every state is also continued twice with the original instruction (`orig`, `orig_rep`):
+their disagreement is the noise floor that instruction effects are compared against. determinism.json records,
+per state, where the two orig action sequences first differ; for the first state it also checks that two
+restores give identical observations (if not, restoring is broken and the script stops) and that the policy
+returns identical actions for one observation twice.
 
 Run with the model repo first on PYTHONPATH (bridges2/run.sbatch REPO=vla-adapter|oft):
   python scripts/e3_grasp_branch.py --checkpoint $CKPT/LIBERO-Goal-Pro --out $RESULTS/e3/va-run1
@@ -26,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from langeval.branch import rollout, same_actions, settle
+from langeval.branch import divergence, restore, rollout, same_obs, settle, snapshot
 from langeval.goal_matrix import GoalTracker
 from langeval.goal_predicates import load_goals, satisfied
 from langeval.instructions import PERTURBATIONS, load_paraphrases, perturb
@@ -98,7 +101,7 @@ def main() -> None:
         "started": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=2))
     episodes = open(out / "episodes.jsonl", "w")
     collection = []
-    checked_determinism = False
+    checked_restore, restore_check, replays = False, None, []
 
     for tid in task_ids:
         task = suite.get_task(tid)
@@ -131,7 +134,9 @@ def main() -> None:
                               on_step=lambda t, o: det.update(object_z(env, target), is_grasped(env, target), t))
                 if res["error"] is None and det.stable_step is not None:
                     path = out / "states" / f"t{tid}-{src_kind}{len(states)}-init{k}.npz"
-                    np.savez(path, state=env.get_sim_state(), grasp_step=det.stable_step, rest_z=det.rest_z)
+                    snap = snapshot(env)
+                    np.savez(path, state=snap["state"], gripper=snap["gripper"], grasp_step=det.stable_step,
+                             rest_z=det.rest_z)
                     states.append({"path": path, "src_kind": src_kind, "src_cat": src_cat, "src_text": src_text,
                                    "init": k, "grasp_step": det.stable_step, "rest_z": det.rest_z})
                     n_grasp += 1
@@ -143,7 +148,7 @@ def main() -> None:
 
         # ---- 2. branch ----
         # The source paraphrases are always continuations too: (para state, same para) is the 2x2's fourth cell.
-        conts = [("orig", "", task.language)]
+        conts = [("orig", "", task.language), ("orig_rep", "", task.language)]
         conts += [("para_source", f'{r["high"]}/{r["mid"]}/{r["low"]}', r["new_instruction"]) for r in src_paras]
         fresh = [r for r in rows if r["new_instruction"] not in {p["new_instruction"] for p in src_paras}]
         conts += [("para", f'{r["high"]}/{r["mid"]}/{r["low"]}', r["new_instruction"])
@@ -155,8 +160,24 @@ def main() -> None:
                       if j != g_self and g.target == target]
 
         for s in states:
-            state = np.load(s["path"])["state"]
+            npz = np.load(s["path"])
+            snap = {"state": npz["state"], "gripper": npz["gripper"]}
             budget = max_steps - s["grasp_step"]
+            if not checked_restore:
+                o1 = restore(env, snap)
+                a1 = policy.act(o1, task.language)
+                a1_again = policy.act(o1, task.language)
+                o2 = restore(env, snap)
+                restore_check = {"state": s["path"].name, "restore_obs_equal": same_obs(o1, o2),
+                                 "policy_repeatable": all(np.array_equal(x, y) for x, y in zip(a1, a1_again)),
+                                 "first_chunk_equal_after_two_restores": all(
+                                     np.array_equal(x, y) for x, y in zip(a1, policy.act(o2, task.language)))}
+                print("restore check:", restore_check, flush=True)
+                if not restore_check["restore_obs_equal"]:
+                    (out / "determinism.json").write_text(json.dumps({"restore_check": restore_check}, indent=2))
+                    raise SystemExit("two restores of one state give different observations: restore is broken")
+                checked_restore = True
+            orig_actions = {}
             for cont_kind, cont_cat, cont_text in conts:
                 tracker = GoalTracker(len(goals), args.hold_steps, prefer=g_self)
                 others = [o for o in movable_objects(env) if o != target]
@@ -167,25 +188,10 @@ def main() -> None:
                     other_grasped[0] |= any(is_grasped(env, n) for n in others)
                     return tracker.update(satisfied(env, goals), t)
 
-                env.reset()
-                obs = env.set_init_state(state)
+                obs = restore(env, snap)
                 res = rollout(env, policy, cont_text, obs, steps=budget, on_step=on_step)
-
-                if not checked_determinism and cont_kind == "orig":
-                    env.reset()
-                    obs = env.set_init_state(state)
-                    replay = rollout(env, policy, cont_text, obs, steps=res["steps"])
-                    ok = same_actions(res["actions"], replay["actions"])
-                    (out / "determinism.json").write_text(json.dumps({"state": str(s["path"]), "identical": ok,
-                                                                      "steps": res["steps"]}))
-                    if policy.deterministic and not ok:
-                        raise SystemExit("restoring a saved state does not reproduce the trajectory: E3 is invalid")
-                    checked_determinism = True
-                    env.reset()
-                    obs = env.set_init_state(state)
-                    tracker = GoalTracker(len(goals), args.hold_steps, prefer=g_self)
-                    other_grasped, eef = [False], []
-                    res = rollout(env, policy, cont_text, obs, steps=budget, on_step=on_step)
+                if cont_kind in ("orig", "orig_rep"):
+                    orig_actions[cont_kind] = res["actions"]
 
                 outcome = "error" if res["error"] else classify_outcome(
                     target_goal=g_self, executed=tracker.executed, target_grasped_end=is_grasped(env, target),
@@ -200,11 +206,17 @@ def main() -> None:
                       "steps": res["steps"], "error": res["error"]}
                 episodes.write(json.dumps(ep) + "\n")
                 episodes.flush()
-            print(f"task {tid} state {s['path'].name}: {len(conts)} branches", flush=True)
+            replays.append({"task_id": tid, "state": s["path"].name,
+                            **divergence(orig_actions["orig"], orig_actions["orig_rep"])})
+            print(f"task {tid} state {s['path'].name}: {len(conts)} branches, orig vs orig_rep: {replays[-1]}",
+                  flush=True)
         env.close()
 
     episodes.close()
     (out / "collection.json").write_text(json.dumps(collection, indent=2))
+    (out / "determinism.json").write_text(json.dumps({"restore_check": restore_check, "orig_vs_orig_rep": replays,
+                                                      "n_identical": sum(r["first_diff_step"] is None for r in replays)},
+                                                     indent=2))
     eps = [json.loads(l) for l in open(out / "episodes.jsonl")]
     table = Counter((e["source"], e["cont"], e["outcome"]) for e in eps)
     summary = {}

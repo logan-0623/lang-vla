@@ -1,10 +1,12 @@
 """Rollouts that can start from any saved simulator state (E3 grasp-state branching, E4 instruction switching).
 
-LIBERO's full state is `env.get_sim_state()` (MuJoCo qpos/qvel flattened); `env.set_init_state(s)` restores it
-and returns a fresh observation. The OSC controller takes delta actions from the current pose, so no hidden
-controller state needs saving; the policy's open-loop action queue is cleared at every (re)start, so a branch
-always begins with a fresh query. Whether a restore reproduces a trajectory exactly is checked at run time
-(`same_actions`), never assumed.
+LIBERO's sim state is `env.get_sim_state()` (MuJoCo time/qpos/qvel flattened); `env.set_init_state(s)` restores it
+and returns a fresh observation. That is not the whole state: robosuite grippers keep `current_action`, which moves
+toward the commanded open/close by a small step every sim substep. A stable grasp has it saturated closed, while
+a reset leaves it at 0 (half open), so a restore without it loosens the fingers for the first few steps.
+`snapshot` / `restore` carry it. The OSC controller takes delta actions from the current pose, so it holds no
+state to save; the policy's open-loop action queue is cleared at every (re)start, so a branch always begins with
+a fresh query. Whether a restore reproduces a trajectory is measured at run time (`divergence`), never assumed.
 """
 from __future__ import annotations
 
@@ -21,6 +23,25 @@ def settle(env, init_state, wait_steps: int = 10):
     obs = env.set_init_state(init_state)
     for _ in range(wait_steps):
         obs, *_ = env.step(DUMMY_ACTION)
+    return obs
+
+
+def _grippers(env) -> list:
+    return [r.gripper for r in env.env.robots]
+
+
+def snapshot(env) -> dict:
+    """Everything `restore` needs: MuJoCo state plus each gripper's `current_action`."""
+    return {"state": np.asarray(env.get_sim_state()).copy(),
+            "gripper": np.stack([np.asarray(g.current_action, float).copy() for g in _grippers(env)])}
+
+
+def restore(env, snap) -> dict:
+    """Reset, restore the MuJoCo state and the grippers' `current_action`; returns the observation."""
+    env.reset()
+    obs = env.set_init_state(snap["state"])
+    for g, a in zip(_grippers(env), snap["gripper"]):
+        g.current_action = np.array(a, float)
     return obs
 
 
@@ -50,3 +71,15 @@ def rollout(env, policy, instruction: str, obs, *, steps: int,
 
 def same_actions(a: list, b: list) -> bool:
     return len(a) == len(b) and all(np.array_equal(x, y) for x, y in zip(a, b))
+
+
+def divergence(a: list, b: list) -> dict:
+    """Where two action sequences first differ and by how much (None: identical over the common length)."""
+    n = min(len(a), len(b))
+    diffs = [float(np.max(np.abs(np.asarray(x) - np.asarray(y)))) for x, y in zip(a[:n], b[:n])]
+    first = next((i for i, d in enumerate(diffs) if d > 0), None)
+    return {"len_a": len(a), "len_b": len(b), "first_diff_step": first, "max_abs_diff": max(diffs, default=0.0)}
+
+
+def same_obs(a: dict, b: dict) -> bool:
+    return a.keys() == b.keys() and all(np.array_equal(np.asarray(a[k]), np.asarray(b[k])) for k in a)

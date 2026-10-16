@@ -123,3 +123,29 @@ def test_rollout_requeries_per_chunk_and_stops():
 def test_rollout_reports_errors():
     res = rollout(FakeEnv(fail_at=5), FakePolicy(), "x", {}, steps=20)
     assert res["error"].startswith("RuntimeError") and res["steps"] == 4
+
+
+def test_restore_carries_gripper_current_action_and_divergence():
+    from types import SimpleNamespace
+    from langeval.branch import divergence, restore, snapshot
+
+    g = SimpleNamespace(current_action=np.array([-1.0, 1.0]))
+    inner = SimpleNamespace(robots=[SimpleNamespace(gripper=g)])
+
+    class Env:
+        env = inner
+        sim = np.array([1.0, 2.0])
+        def get_sim_state(self): return self.sim
+        def reset(self): g.current_action = np.zeros(2)          # what a robosuite reset does
+        def set_init_state(self, s): self.sim = np.array(s); return {"x": self.sim}
+
+    env = Env()
+    snap = snapshot(env)
+    env.sim, g.current_action = np.array([9.0, 9.0]), np.array([0.3, -0.3])
+    obs = restore(env, snap)
+    assert np.array_equal(obs["x"], [1.0, 2.0]) and np.array_equal(g.current_action, [-1.0, 1.0])
+
+    a = [np.zeros(7), np.ones(7)]
+    assert divergence(a, a)["first_diff_step"] is None
+    d = divergence(a, [np.zeros(7), np.ones(7) * 1.5])
+    assert d["first_diff_step"] == 1 and d["max_abs_diff"] == 0.5

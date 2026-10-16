@@ -115,3 +115,25 @@ One entry per decision: what was decided, why, and what it affects.
   - a paraphrase ending in "?" merges with the template's "?" into one BPE token; `instruction_span` now ends the span before the merged token instead of raising;
   - OFT's `predict_action` appends the empty token 29871 to the prompt, so the LLM sequence has one more token than the tokenized prompt (L=593: 1 + 513 + 22 + 56 + 1). The layout assertion caught it.
 - pi0.5 E0 (LeRobot, no torch.compile, 10 envs per batch): 484/500 = 96.8%, CI95 [94.9, 98.0]; 500 episodes in 1971 s, about 910 rollouts per GPU-hour.
+
+## 2026-10-16 E3 restore: gripper state, and a noise floor instead of a bitwise gate
+
+- First real E3 pilots (jobs 49272496/8) stopped at the bitwise replay check for both VLA-Adapter and OFT. The cause is not yet known (no diagnostics were saved). Found while reading for it: robosuite grippers keep `current_action`, which ramps toward open/close a little every sim substep and is **not** in `get_sim_state()`. At a stable grasp it is saturated closed; after `reset()` it is 0 (half open), so every restored branch loosened the fingers for its first steps. That changes physics, not just reproducibility. `langeval.branch.snapshot/restore` now save and restore it.
+- The run-time check now separates three things (determinism.json): two restores of one state give identical observations (if not, restore is broken and the script stops); the policy gives identical actions for one observation twice; and, for every state, where `orig` and `orig_rep` (the original instruction run twice from the same restore) first diverge.
+- `orig_rep` is a continuation on every state. If bitwise reproducibility does not hold, the orig-vs-orig_rep outcome disagreement is the noise floor; an instruction effect counts only if it exceeds it. This replaces "stop unless bitwise identical" in the E3 entry above.
+
+## 2026-10-16 E6 first results (VLA-Adapter Goal-Pro, OFT Goal; 10 tasks x 3 init states, 5 paraphrases per category)
+
+R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act (verb), obj (object), comp (both).
+
+| | R_action VLA-Adapter | R_action OFT | R action slots, last layer VA / OFT |
+|---|---|---|---|
+| act | 0.27 | 0.20 | 0.52 / 0.58 |
+| obj | 0.30 | 0.31 | 0.58 / 0.54 |
+| comp | 0.43 | 0.41 | 0.74 / 0.83 |
+| empty | 0.76 | 1.03 | 0.88 / 0.92 |
+
+- Same ranking in both models: act < obj < comp < empty, matching LIBERO-Para's finding that object changes hurt more than verb changes. A paraphrase moves the action chunk 20-43% of the way to a different task; the empty instruction moves OFT's chunk as far as a different task does.
+- The action-slot representation moves more (R 0.5-0.8) than the action chunk (0.2-0.4): the head is more invariant than its input.
+- **Caveat:** OFT's action-slot R exceeds 1 in layers 3-9 (up to 5.3 for act). Paraphrases change the prompt length, which shifts the RoPE positions of every action slot; other tasks' instructions differ in length less. Early/middle-layer R is therefore confounded by length; compare length-matched pairs before interpreting it.
+- Not yet done: CIs, per-paraphrase R_action vs that paraphrase's LIBERO-Para success (does R_action predict failure?), and the two bddl-wording sentences.
