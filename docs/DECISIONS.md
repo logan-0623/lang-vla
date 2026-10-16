@@ -143,3 +143,7 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - Two restores of one saved state: qpos identical, both camera images different. Between the two hard resets the model's `body_pos` changed for `wooden_cabinet_1_main` (1.7 cm), `wine_rack_1_main` (1.5 cm) and `flat_stove_1_main` (0.6 cm). Fixtures have no joints, so their placement is not in `get_sim_state()`; LIBERO samples it again at every hard reset. Restoring without a reset gives identical observations, so nothing else is hidden.
 - The official eval path (reset + init state 0, twice) also gives different images: fixture jitter is part of LIBERO's evaluation distribution, and an init state does not pin the scene. This does not affect E0, but it does mean "the same init state" in LIBERO-Para's protocol is not the same scene twice.
 - Fix: `snapshot` saves `body_pos` / `body_quat`; `restore` writes them back after the reset and before `set_init_state` (which runs `mj_forward`). States collected before this fix cannot be restored faithfully; recollect.
+
+## 2026-10-16 E3 restore verified bitwise
+
+- Pilots 49316500 (VLA-Adapter) / 49316501 (OFT), tasks 2 and 4: two restores give identical observations, the policy is repeatable, and `orig` vs `orig_rep` are bitwise identical on every state (first_diff_step None). With fixture placement and gripper state restored, E3 branches are exact counterfactuals; `orig_rep` stays as a running check.
