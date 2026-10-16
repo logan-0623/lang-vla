@@ -2,6 +2,7 @@
 
 Do vision-language-action models read their instructions, and when? Evaluation and interpretability on LIBERO.
 
+- `docs/RESEARCH_PLAN.md`: **start here**. Overview of questions, gaps, hypotheses, every experiment (design, implementation, status) and budget
 - `docs/RESEARCH_DESIGN.md`: questions, gaps in the literature, hypotheses, experiments E0–E7
 - `IMPLEMENTATION_PLAN.md`: the full build plan (training arms, metrics, probes)
 - `docs/DECISIONS.md`: design decisions and traps found in upstream code
