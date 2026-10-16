@@ -137,3 +137,9 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - The action-slot representation moves more (R 0.5-0.8) than the action chunk (0.2-0.4): the head is more invariant than its input.
 - **Caveat:** OFT's action-slot R exceeds 1 in layers 3-9 (up to 5.3 for act). Paraphrases change the prompt length, which shifts the RoPE positions of every action slot; other tasks' instructions differ in length less. Early/middle-layer R is therefore confounded by length; compare length-matched pairs before interpreting it.
 - Not yet done: CIs, per-paraphrase R_action vs that paraphrase's LIBERO-Para success (does R_action predict failure?), and the two bddl-wording sentences.
+
+## 2026-10-16 LIBERO re-samples fixture placement on every reset (diag_restore, job 49316115)
+
+- Two restores of one saved state: qpos identical, both camera images different. Between the two hard resets the model's `body_pos` changed for `wooden_cabinet_1_main` (1.7 cm), `wine_rack_1_main` (1.5 cm) and `flat_stove_1_main` (0.6 cm). Fixtures have no joints, so their placement is not in `get_sim_state()`; LIBERO samples it again at every hard reset. Restoring without a reset gives identical observations, so nothing else is hidden.
+- The official eval path (reset + init state 0, twice) also gives different images: fixture jitter is part of LIBERO's evaluation distribution, and an init state does not pin the scene. This does not affect E0, but it does mean "the same init state" in LIBERO-Para's protocol is not the same scene twice.
+- Fix: `snapshot` saves `body_pos` / `body_quat`; `restore` writes them back after the reset and before `set_init_state` (which runs `mj_forward`). States collected before this fix cannot be restored faithfully; recollect.

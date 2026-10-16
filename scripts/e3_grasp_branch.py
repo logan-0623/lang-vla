@@ -135,8 +135,7 @@ def main() -> None:
                 if res["error"] is None and det.stable_step is not None:
                     path = out / "states" / f"t{tid}-{src_kind}{len(states)}-init{k}.npz"
                     snap = snapshot(env)
-                    np.savez(path, state=snap["state"], gripper=snap["gripper"], grasp_step=det.stable_step,
-                             rest_z=det.rest_z)
+                    np.savez(path, **snap, grasp_step=det.stable_step, rest_z=det.rest_z)
                     states.append({"path": path, "src_kind": src_kind, "src_cat": src_cat, "src_text": src_text,
                                    "init": k, "grasp_step": det.stable_step, "rest_z": det.rest_z})
                     n_grasp += 1
@@ -161,7 +160,7 @@ def main() -> None:
 
         for s in states:
             npz = np.load(s["path"])
-            snap = {"state": npz["state"], "gripper": npz["gripper"]}
+            snap = {k: npz[k] for k in ("state", "body_pos", "body_quat", "gripper")}
             budget = max_steps - s["grasp_step"]
             if not checked_restore:
                 o1 = restore(env, snap)

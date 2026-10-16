@@ -125,18 +125,21 @@ def test_rollout_reports_errors():
     assert res["error"].startswith("RuntimeError") and res["steps"] == 4
 
 
-def test_restore_carries_gripper_current_action_and_divergence():
+def test_restore_carries_gripper_fixtures_and_divergence():
     from types import SimpleNamespace
     from langeval.branch import divergence, restore, snapshot
 
     g = SimpleNamespace(current_action=np.array([-1.0, 1.0]))
-    inner = SimpleNamespace(robots=[SimpleNamespace(gripper=g)])
+    model = SimpleNamespace(body_pos=np.zeros((3, 3)), body_quat=np.ones((3, 4)))
+    inner = SimpleNamespace(robots=[SimpleNamespace(gripper=g)], sim=SimpleNamespace(model=model))
 
     class Env:
         env = inner
         sim = np.array([1.0, 2.0])
         def get_sim_state(self): return self.sim
-        def reset(self): g.current_action = np.zeros(2)          # what a robosuite reset does
+        def reset(self):                                         # what a robosuite hard reset does
+            g.current_action = np.zeros(2)
+            model.body_pos[:] = np.random.rand(3, 3)
         def set_init_state(self, s): self.sim = np.array(s); return {"x": self.sim}
 
     env = Env()
@@ -144,6 +147,7 @@ def test_restore_carries_gripper_current_action_and_divergence():
     env.sim, g.current_action = np.array([9.0, 9.0]), np.array([0.3, -0.3])
     obs = restore(env, snap)
     assert np.array_equal(obs["x"], [1.0, 2.0]) and np.array_equal(g.current_action, [-1.0, 1.0])
+    assert np.array_equal(model.body_pos, np.zeros((3, 3)))
 
     a = [np.zeros(7), np.ones(7)]
     assert divergence(a, a)["first_diff_step"] is None

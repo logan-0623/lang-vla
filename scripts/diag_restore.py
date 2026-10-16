@@ -58,7 +58,9 @@ def main():
     suite = benchmark.get_benchmark_dict()[args.suite]()
     env, desc = get_libero_env(suite.get_task(args.task), "openvla", resolution=256)
     d = np.load(args.npz)
-    snap = {"state": d["state"], "gripper": d["gripper"]}
+    snap = {k: d[k] for k in d.files if k in ("state", "body_pos", "body_quat", "gripper")}
+    if "body_pos" not in snap:                          # states saved before fixture placement was recorded
+        snap["body_pos"], snap["body_quat"] = (np.array(getattr(env.env.sim.model, f)) for f in ("body_pos", "body_quat"))
     report = {"task": desc}
 
     o1 = restore(env, snap); m1 = model_arrays(env)

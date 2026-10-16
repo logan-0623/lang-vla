@@ -4,7 +4,8 @@ LIBERO's sim state is `env.get_sim_state()` (MuJoCo time/qpos/qvel flattened); `
 and returns a fresh observation. That is not the whole state: robosuite grippers keep `current_action`, which moves
 toward the commanded open/close by a small step every sim substep. A stable grasp has it saturated closed, while
 a reset leaves it at 0 (half open), so a restore without it loosens the fingers for the first few steps.
-`snapshot` / `restore` carry it. The OSC controller takes delta actions from the current pose, so it holds no
+And every hard reset re-samples the fixtures' placement (cabinet, stove, rack move by up to ~2 cm), which lives in
+the model's `body_pos` / `body_quat`, not in qpos (scripts/diag_restore.py). `snapshot` / `restore` carry both. The OSC controller takes delta actions from the current pose, so it holds no
 state to save; the policy's open-loop action queue is cleared at every (re)start, so a branch always begins with
 a fresh query. Whether a restore reproduces a trajectory is measured at run time (`divergence`), never assumed.
 """
@@ -31,15 +32,23 @@ def _grippers(env) -> list:
 
 
 def snapshot(env) -> dict:
-    """Everything `restore` needs: MuJoCo state plus each gripper's `current_action`."""
+    """Everything `restore` needs: MuJoCo state, fixture placement and each gripper's `current_action`."""
+    m = env.env.sim.model
     return {"state": np.asarray(env.get_sim_state()).copy(),
+            "body_pos": np.array(m.body_pos), "body_quat": np.array(m.body_quat),
             "gripper": np.stack([np.asarray(g.current_action, float).copy() for g in _grippers(env)])}
 
 
 def restore(env, snap) -> dict:
-    """Reset, restore the MuJoCo state and the grippers' `current_action`; returns the observation."""
+    """Reset, put the fixtures back where they were, restore the MuJoCo state and the grippers'
+    `current_action`; returns the observation."""
     env.reset()
-    obs = env.set_init_state(snap["state"])
+    m = env.env.sim.model
+    for f in ("body_pos", "body_quat"):
+        if np.shape(snap[f]) != np.shape(getattr(m, f)):
+            raise ValueError(f"{f}: saved {np.shape(snap[f])} vs model {np.shape(getattr(m, f))}")
+        getattr(m, f)[:] = snap[f]
+    obs = env.set_init_state(snap["state"])            # set_init_state runs mj_forward with the restored model
     for g, a in zip(_grippers(env), snap["gripper"]):
         g.current_action = np.array(a, float)
     return obs
