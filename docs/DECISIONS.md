@@ -92,3 +92,9 @@ One entry per decision: what was decided, why, and what it affects.
 - VLA-Adapter LIBERO-Goal-Pro, 1 trial x 10 tasks: 9/10 success. OFT Goal forward 15.0 GiB peak, VLA-Adapter 3.5 GiB.
 - pi0.5 loads its tokenizer from the gated `google/paligemma-3b-pt-224`: requires HF license acceptance + login (`download_assets.sh`).
 - `MUJOCO_GL=egl` makes robosuite hang at import on login nodes (no GPU): import tests must run inside a GPU job.
+
+## 2026-10-15 LIBERO-Para's fork changes the original suites' instructions (E0 numbers before this fix are invalid)
+
+- First E0 on Bridges-2: OFT Goal 418/500 = 83.6% (official 97.9%), VLA-Adapter bench 25/30. Cause: the fork's `benchmark/__init__.py` builds every suite's `task.language` from the bddl `(:language ...)` field instead of the filename. For libero_goal these differ, e.g. "Open the middle layer of the drawer" vs "open the middle drawer of the cabinet", "Put the bowl on the top of the drawer" vs "put the bowl on top of the cabinet", "Put the cream cheese on the bowl" vs "... in the bowl". Upstream LIBERO, the training data and LIBERO-Para's own `original_instruction` column all use the filename form.
+- Fix: `patches/libero-para-filename-language.patch` (applied by `setup_vla.sh`) uses the filename form for every suite except `libero_para`. Without it, matching LIBERO-Para rows by instruction text (E3/E6) would also have failed.
+- Jobs 49250616 (smoke), 49255711 (bench), 49255723 (OFT E0) ran with the bddl wording. Their success rates are not E0; they are kept as an unplanned observation: a 3-task rewording (bddl wording) costs OFT ~14 points on Goal. The bench throughput numbers are still valid.

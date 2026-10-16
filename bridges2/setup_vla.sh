@@ -19,6 +19,10 @@ use_env vla
 clone() { [ -d "$2" ] || git clone -q "$1" "$2"; git -C "$2" checkout -q "$3"; }
 clone https://github.com/moojink/openvla-oft.git "$OFT" "$OFT_REV"
 clone https://github.com/cau-hai-lab/LIBERO-Para.git "$PARA" "$PARA_REV"
+# The fork takes every suite's instruction from the bddl (:language) text, which differs from the filename-derived
+# instruction all published evals use (OFT Goal: 83.6% instead of 97.9%). Restore it for the original suites.
+P=$LANGVLA_ROOT/patches/libero-para-filename-language.patch
+git -C "$PARA" apply --reverse --check "$P" 2>/dev/null || git -C "$PARA" apply "$P"
 
 pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0
 # Same dependency list as both pyproject.toml files (they are identical), minus the editable package itself.

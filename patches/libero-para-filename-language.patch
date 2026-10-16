@@ -1,0 +1,27 @@
+diff --git a/libero/libero/benchmark/__init__.py b/libero/libero/benchmark/__init__.py
+index 0f520fc..9d3bccc 100755
+--- a/libero/libero/benchmark/__init__.py
++++ b/libero/libero/benchmark/__init__.py
+@@ -42,7 +42,6 @@ class Task(NamedTuple):
+ 
+ 
+ def grab_language_from_filename(x):
+-    print(f"filename: {x}")
+     if x[0].isupper():  # LIBERO-100
+         if "SCENE10" in x:
+             language = " ".join(x[x.find("SCENE") + 8 :].split("_"))
+@@ -77,7 +76,13 @@ for libero_suite in libero_suites:
+     task_maps[libero_suite] = {}
+     for task in libero_task_map[libero_suite]:
+         language_path = os.path.join(filepath_mother, libero_suite, f"{task}.bddl")
+-        language = get_language(language_path)
++        # Original suites: instruction from the filename, as upstream LIBERO and every published eval do.
++        # The bddl (:language ...) text differs for several libero_goal tasks (e.g. "Open the middle layer
++        # of the drawer"); only libero_para's paraphrases live there.
++        if libero_suite == "libero_para":
++            language = get_language(language_path)
++        else:
++            language = grab_language_from_filename(task + ".bddl")
+         task_maps[libero_suite][task] = Task(
+             name=task,
+             language=language,
