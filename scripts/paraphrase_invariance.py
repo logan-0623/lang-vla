@@ -46,15 +46,20 @@ def instruction_span(tokenize, template: str, instruction: str) -> tuple[int, in
     """[start, end) of the instruction's tokens within tokenize(template.format(instruction)).
 
     The prefix is tokenized without its trailing space, because BPE / sentencepiece attach that space to the
-    instruction's first word. Both boundaries are checked against the full prompt's tokens.
+    instruction's first word. The start is checked against the full prompt's tokens. At the end, the
+    instruction's last token can merge with the template text after it (a paraphrase ending in "?" followed by
+    the template's "?" becomes "??"); the span then stops before the merged token.
     """
     pre = template.split("{}")[0]
     full = tokenize(template.format(instruction))
     head = tokenize(pre.rstrip(" "))
     upto = tokenize(pre + instruction) if instruction else head
-    if full[: len(head)] != head or full[: len(upto)] != upto:
-        raise ValueError(f"prompt does not tokenize at the instruction boundary: {instruction!r}")
-    return len(head), len(upto)
+    if full[: len(head)] != head:
+        raise ValueError(f"prompt does not tokenize at the instruction start: {instruction!r}")
+    e = len(head)
+    while e < min(len(full), len(upto)) and full[e] == upto[e]:
+        e += 1
+    return len(head), e
 
 
 def ratio(d: np.ndarray, d_other: np.ndarray) -> np.ndarray:
@@ -112,7 +117,9 @@ def main() -> None:
                              action_head=action_head, proprio_projector=proprio_projector, use_film=cfg.use_film,
                              **({"use_minivlm": cfg.use_minivlm} if is_adapter else {}))
         h = torch.stack([captured[li][0] for li in layer_ids])           # (layers, L, D)
-        T = len(tokenize(template.format(instruction.lower())))
+        ids = tokenize(template.format(instruction.lower()))
+        # OFT's predict_action appends the empty token 29871 when the prompt does not end with it.
+        T = len(ids) + (not is_adapter and ids[-1] != 29871)
         P = h.shape[1] - T - n_slots - 1                                # vision (+ proprio token for OFT)
         if P not in (n_vision, n_vision + 1):
             raise RuntimeError(f"unexpected layout: L={h.shape[1]} T={T} slots={n_slots} -> P={P}, "

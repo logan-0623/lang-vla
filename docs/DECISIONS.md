@@ -107,3 +107,11 @@ One entry per decision: what was decided, why, and what it affects.
   - "put the wine bottle on the top of the drawer" (vs "on top of the cabinet"): 12/50 vs 50/50
   The other three reworded tasks are unchanged ("middle layer of the drawer" 48 vs 49, "top layer of the drawer and put the bowl inside" 45 vs 44, cream cheese "on" vs "in" the bowl 50 vs 50).
 - Reading: changing the preposition does nothing; replacing the **location noun with another fixture's name that appears in other training instructions** ("drawer") costs 60-76 points. Consistent with H3 (a content word acts as a retrieval key) and with LIBERO-Para's "nouns matter most", but here the noun is the target location, not the object. Which goal was executed instead is unknown: the upstream eval only records success. Next: E3 on tasks 2 and 4 with this wording as the source paraphrase (`configs/bddl_wording_paraphrases.json`), which records the executed goal and the phase of failure.
+
+## 2026-10-16 The fork also reorders the original suites; E6 layout fixes; pi0.5 E0
+
+- LIBERO-Para's `libero_suite_task_map.py` lists libero_spatial / object / goal / 10 in **alphabetical** order instead of upstream's (libero_90 unchanged). Task ids passed to our scripts therefore pointed at different tasks (the first E3 pilot asked for 2,4 and got "push the plate" and "bowl on the stove"). Episodes were never mismatched with their init states (both are looked up by task name), so E0 numbers stand. `patches/libero-para-filename-language.patch` now also restores upstream order, which matches hf-libero in the `lerobot` env, so task ids mean the same task for every model.
+- E6 fixes found on the first real run:
+  - a paraphrase ending in "?" merges with the template's "?" into one BPE token; `instruction_span` now ends the span before the merged token instead of raising;
+  - OFT's `predict_action` appends the empty token 29871 to the prompt, so the LLM sequence has one more token than the tokenized prompt (L=593: 1 + 513 + 22 + 56 + 1). The layout assertion caught it.
+- pi0.5 E0 (LeRobot, no torch.compile, 10 envs per batch): 484/500 = 96.8%, CI95 [94.9, 98.0]; 500 episodes in 1971 s, about 910 rollouts per GPU-hour.

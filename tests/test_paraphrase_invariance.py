@@ -29,6 +29,15 @@ def test_instruction_span_empty_instruction():
     assert s == e
 
 
+def test_instruction_span_last_token_merges_with_template():
+    # A tokenizer that merges "??" into one token, as BPE does.
+    merge = lambda s: [hash(w) for w in re.findall(r" ?[^ ?]+| ?\?\??", s)]
+    instr = "could you open the drawer?"
+    s, e = pi.instruction_span(merge, pi.LLAMA_PROMPT, instr)
+    full = merge(pi.LLAMA_PROMPT.format(instr))
+    assert full[s:e] == merge(" could you open the drawer")
+
+
 def test_ratio_handles_zero_reference():
     r = pi.ratio(np.array([1.0, 2.0, 0.0]), np.array([2.0, 0.0, 0.0]))
     assert r[0] == 0.5 and np.isnan(r[1]) and np.isnan(r[2])
