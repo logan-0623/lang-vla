@@ -53,7 +53,7 @@ def e3_section(since):
         print(f"{d.name}: {len(eps)} branches, orig==orig_rep {det.get('n_identical', '?')}/{n_rep}, "
               f"collection " + "; ".join(f"t{c['task_id']} {c['source']} {c['grasps']}/{c['attempts']}" for c in col))
         model = "oft" if "-oft" in d.name else "vla-adapter"
-        kind = "wording" if d.name.startswith("wording") else "para"
+        kind = d.name.split("-")[0]                     # para / wording / src3 ...: never pooled
         by_model[(model, kind)].extend(eps)
 
     for (model, kind), eps in sorted(by_model.items()):
