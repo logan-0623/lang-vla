@@ -115,3 +115,23 @@ R_action 是改写让动作块偏移的程度，以换成另一个任务时的�
 ### 还没分析
 - LIBERO-Para 官方评测的逐条成功率（输出格式待确认），用来检验 E6 的 R_action 能否预测一条改写会不会失败。
 - E1 的混淆矩阵。
+
+### 补充（同一批数据）：来源改写的句子说明了什么
+
+用于抓起之后接续的来源改写，以及抓起后实际执行的目标：
+
+| 任务 | 来源改写 | OFT 抓起后改成这句 | VLA-Adapter 抓起后改成这句 |
+|---|---|---|---|
+| t4 碗→柜顶 | "put the bowl on top of the **locker**" | 灶台 16，柜顶 4 | 柜顶 20 |
+| t8 碗→盘子 | "put the **vessel** on the **platter**" | 灶台 10，盘子 3，其他 7 | 盘子 8，掉落 11，其他 1 |
+| t2 酒瓶→柜顶 | "put the **wine drink bottle** on top of the **storage unit**" | 柜顶 20（但用这句抓起的状态接回原指令：酒架 13） | 柜顶 20（同上：酒架 8） |
+| t1、t3、t6、t9 | container / compartment / mixing bowl / shelf | 全部成功 | 全部成功 |
+
+- **解读**：目标位置的名词是检索键。键不认识时（locker、platter、storage unit），模型就退回到它自己的默认去向，和给空指令时一样（见 F5）：
+  - OFT 的碗默认去灶台，VLA-Adapter 的碗默认去柜顶；
+  - 酒瓶默认去酒架。
+- VLA-Adapter 在 locker 这句上拿到 20/20，只是因为它的默认去向正好是柜顶。LIBERO-Para 统计的成功里，有一部分是默认去向和目标重合造成的。
+- **退回默认去向的时机取决于物体**：碗在抓起之后才退回，酒瓶在抓取时就已经退回了。
+- **待检验**（`bridges2/batch_1017b.sh`，`configs/nonce_words.json`）：
+  1. 把目标名词换成无意义词（blicket / dax），结果应该和空指令一样，都落到默认去向；
+  2. 只把物体名词换成无意义词，抓起之后应该和原指令一样。

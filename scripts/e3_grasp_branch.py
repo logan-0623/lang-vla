@@ -62,7 +62,8 @@ def main() -> None:
     ap.add_argument("--source_paraphrases", type=int, default=1)
     ap.add_argument("--cont_paraphrases", type=int, default=3)
     ap.add_argument("--para_csv", default=None, help="default: $PARA/metrics/libero_para_metadata.csv")
-    ap.add_argument("--paraphrase_json", default=None, help='non-Goal suites: {"instruction": ["para", ...]}')
+    ap.add_argument("--paraphrase_json", default=None,
+                    help='{"instruction": ["para", ...] or [["category", "para"], ...]} instead of LIBERO-Para')
     ap.add_argument("--hold_steps", type=int, default=10)
     ap.add_argument("--lift_m", type=float, default=0.03)
     ap.add_argument("--grasp_k", type=int, default=5)
@@ -88,7 +89,9 @@ def main() -> None:
     all_goals = load_goals(args.suite) if shared else None
 
     if args.paraphrase_json:
-        para_rows = {k: [{"high": "user", "mid": "user", "low": "", "new_instruction": p} for p in v]
+        # Entries are "text" or ["category", "text"]; each category is picked separately, in sorted order.
+        para_rows = {k: [{"high": "user", "mid": p[0], "low": "", "new_instruction": p[1]} if isinstance(p, list)
+                         else {"high": "user", "mid": "user", "low": "", "new_instruction": p} for p in v]
                      for k, v in json.load(open(args.paraphrase_json)).items()}
     else:
         csv_path = args.para_csv or Path(os.environ["PARA"]) / "metrics/libero_para_metadata.csv"

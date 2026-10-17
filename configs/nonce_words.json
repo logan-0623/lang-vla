@@ -1,0 +1,92 @@
+{
+ "put the bowl on the stove": [
+  [
+   "a_target_nonce",
+   "put the bowl on the blicket"
+  ],
+  [
+   "b_target_nonce",
+   "put the bowl on the dax"
+  ],
+  [
+   "c_object_nonce",
+   "put the blicket on the stove"
+  ],
+  [
+   "d_both_nonce",
+   "put the blicket on the dax"
+  ]
+ ],
+ "put the wine bottle on top of the cabinet": [
+  [
+   "a_target_nonce",
+   "put the wine bottle on top of the blicket"
+  ],
+  [
+   "b_target_nonce",
+   "put the wine bottle on top of the dax"
+  ],
+  [
+   "c_object_nonce",
+   "put the blicket on top of the cabinet"
+  ],
+  [
+   "d_both_nonce",
+   "put the blicket on top of the dax"
+  ]
+ ],
+ "put the bowl on top of the cabinet": [
+  [
+   "a_target_nonce",
+   "put the bowl on top of the blicket"
+  ],
+  [
+   "b_target_nonce",
+   "put the bowl on top of the dax"
+  ],
+  [
+   "c_object_nonce",
+   "put the blicket on top of the cabinet"
+  ],
+  [
+   "d_both_nonce",
+   "put the blicket on top of the dax"
+  ]
+ ],
+ "put the bowl on the plate": [
+  [
+   "a_target_nonce",
+   "put the bowl on the blicket"
+  ],
+  [
+   "b_target_nonce",
+   "put the bowl on the dax"
+  ],
+  [
+   "c_object_nonce",
+   "put the blicket on the plate"
+  ],
+  [
+   "d_both_nonce",
+   "put the blicket on the dax"
+  ]
+ ],
+ "put the wine bottle on the rack": [
+  [
+   "a_target_nonce",
+   "put the wine bottle on the blicket"
+  ],
+  [
+   "b_target_nonce",
+   "put the wine bottle on the dax"
+  ],
+  [
+   "c_object_nonce",
+   "put the blicket on the rack"
+  ],
+  [
+   "d_both_nonce",
+   "put the blicket on the dax"
+  ]
+ ]
+}
