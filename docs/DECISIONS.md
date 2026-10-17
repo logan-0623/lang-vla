@@ -147,3 +147,10 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 ## 2026-10-16 E3 restore verified bitwise
 
 - Pilots 49316500 (VLA-Adapter) / 49316501 (OFT), tasks 2 and 4: two restores give identical observations, the policy is repeatable, and `orig` vs `orig_rep` are bitwise identical on every state (first_diff_step None). With fixture placement and gripper state restored, E3 branches are exact counterfactuals; `orig_rep` stays as a running check.
+
+## 2026-10-17 pi0.5 in E3/E4 (`--backend lerobot`)
+
+- `langeval/adapters/lerobot_policy.py` runs lerobot-eval's own per-step pipeline (format raw obs -> preprocess_observation -> env preprocessor -> policy preprocessor -> select_action x n_action_steps -> postprocessors) on LeRobot's own `LiberoEnv` (360x360, relative control), so preprocessing cannot drift from the E0 numbers. The scripts drive its inner OffScreenRenderEnv, so snapshot/restore and the goal predicates are unchanged.
+- Init states come from LeRobot's loader (weights_only=False; hf-libero's own `get_task_init_states` fails under torch >= 2.6).
+- Noise: the k-th inference of each (re)started rollout uses torch seed (seed, k), reset by `policy.begin()` in `branch.rollout`. Continuations from one state share noise draws (common random numbers), so orig vs orig_rep stays a bitwise check and instruction contrasts are not diluted by sampling noise. Independent replicates = different `--seed`.
+- Not verified on the cluster yet: first run is a pilot.

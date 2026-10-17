@@ -63,6 +63,8 @@ def rollout(env, policy, instruction: str, obs, *, steps: int,
     plain failure (IMPLEMENTATION_PLAN §0.6).
     """
     actions, queue, t = [], [], 0
+    if hasattr(policy, "begin"):            # stochastic policies: same noise sequence for every (re)start
+        policy.begin()
     try:
         while t < steps:
             if not queue:

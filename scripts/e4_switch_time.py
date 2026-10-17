@@ -41,24 +41,21 @@ def main() -> None:
     ap.add_argument("--lift_m", type=float, default=0.03)
     ap.add_argument("--grasp_k", type=int, default=5)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot"],
+                    help="upstream: VLA-Adapter/OFT (vla env, repo on PYTHONPATH); lerobot: pi0.5 etc. (lerobot env)")
     args = ap.parse_args()
     if args.suite != "libero_goal":
         raise SystemExit("E4 needs the shared LIBERO-Goal scene (other goals on the same object)")
 
     from libero.libero import benchmark
-    from experiments.robot.libero.libero_utils import get_libero_env
-    from experiments.robot.libero.run_libero_eval import TASK_MAX_STEPS
-    from experiments.robot.robot_utils import set_seed_everywhere
-    from langeval.adapters.upstream import UpstreamPolicy
+    from langeval.adapters.factory import load
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
-    set_seed_everywhere(args.seed)
-    max_steps = TASK_MAX_STEPS[args.suite]
     taus = [t if t == "start" else int(t) for t in args.taus.split(",")]
     post = max([t for t in taus if t != "start"] + [0])
 
-    policy = UpstreamPolicy(args.checkpoint, args.suite)
+    policy, make_env, get_init_states, max_steps = load(args.backend, args.checkpoint, args.suite, args.seed)
     suite = benchmark.get_benchmark_dict()[args.suite]()
     goals = load_goals(args.suite)
     (out / "run_config.json").write_text(json.dumps({
@@ -77,8 +74,8 @@ def main() -> None:
         if target is None or not alts:
             print(f"task {tid} '{task.language}': no other goal on the same object, skipped")
             continue
-        env, _ = get_libero_env(task, "openvla", resolution=256)
-        init_states = suite.get_task_init_states(tid)
+        env, _ = make_env(suite, tid)
+        init_states = get_init_states(suite, tid)
         conts = [("orig", tid, task.language), ("orig_rep", tid, task.language), ("empty", None, "")]
         conts += [("other", j, goals[j].language) for j in alts]
 

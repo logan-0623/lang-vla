@@ -69,21 +69,18 @@ def main() -> None:
     ap.add_argument("--grasp_k", type=int, default=5)
     ap.add_argument("--stall_window", type=int, default=30, help="final steps over which 'stalled' is judged")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot"],
+                    help="upstream: VLA-Adapter/OFT (vla env, repo on PYTHONPATH); lerobot: pi0.5 etc. (lerobot env)")
     args = ap.parse_args()
 
     from libero.libero import benchmark
-    from experiments.robot.libero.libero_utils import get_libero_env
-    from experiments.robot.libero.run_libero_eval import TASK_MAX_STEPS
-    from experiments.robot.robot_utils import set_seed_everywhere
-    from langeval.adapters.upstream import UpstreamPolicy
+    from langeval.adapters.factory import load
 
     out = Path(args.out)
     (out / "states").mkdir(parents=True, exist_ok=False)          # never overwrite an earlier run
-    set_seed_everywhere(args.seed)
     rng = random.Random(args.seed)
-    max_steps = TASK_MAX_STEPS[args.suite]
 
-    policy = UpstreamPolicy(args.checkpoint, args.suite)
+    policy, make_env, get_init_states, max_steps = load(args.backend, args.checkpoint, args.suite, args.seed)
     suite = benchmark.get_benchmark_dict()[args.suite]()
     shared = args.suite == "libero_goal"                         # all goals share one scene only here
     all_goals = load_goals(args.suite) if shared else None
@@ -119,8 +116,8 @@ def main() -> None:
         if not rows:
             print(f"task {tid}: no paraphrases for '{task.language}', skipped")
             continue
-        env, _ = get_libero_env(task, "openvla", resolution=256)
-        init_states = suite.get_task_init_states(tid)
+        env, _ = make_env(suite, tid)
+        init_states = get_init_states(suite, tid)
         emb_orig = policy.instruction_embedding(task.language)
 
         # ---- 1. collect grasp states ----
@@ -166,10 +163,12 @@ def main() -> None:
             snap = {k: npz[k] for k in ("state", "body_pos", "body_quat", "gripper")}
             budget = max_steps - s["grasp_step"]
             if not checked_restore:
+                begin = getattr(policy, "begin", lambda: None)     # stochastic policies: replay the same noise
                 o1 = restore(env, snap)
-                a1 = policy.act(o1, task.language)
-                a1_again = policy.act(o1, task.language)
+                begin(); a1 = policy.act(o1, task.language)
+                begin(); a1_again = policy.act(o1, task.language)
                 o2 = restore(env, snap)
+                begin()
                 restore_check = {"state": s["path"].name, "restore_obs_equal": same_obs(o1, o2),
                                  "policy_repeatable": all(np.array_equal(x, y) for x, y in zip(a1, a1_again)),
                                  "first_chunk_equal_after_two_restores": all(
