@@ -1,6 +1,7 @@
 # Language and VLAs: research design (zero-training experiments on Bridges-2)
 
 > Written 2026-10-13. The literature section is based on arXiv abstracts and search snippets **as of 2026-10-13**. Anything marked "per the abstract" has not been checked against the full paper. Read the full paper before citing it in a paper of our own.
+> Full-text update: 2609.39971v1 and 2610.10178v1 have now been read, including appendices. Their corrected scope and the current research priorities are recorded in [RESEARCH_PLAN.md, §2.3](RESEARCH_PLAN.md). Other literature claims below remain preliminary.
 > All cost figures are estimates. They must be recalibrated with the measured throughput from E0.
 
 ---
@@ -38,8 +39,8 @@ E3 separates these two.
 | LIBERO-Para [2603.28301] | 7 VLAs | Paraphrase costs −22 to −52 pts, driven mainly by object synonyms; per the abstract, 80–96% of failures are **planning-level trajectory divergence** | **No phase-by-phase breakdown**. Your observation that the object gets lifted but the task fails is in tension with "mostly planning-level", which needs a state-matched experiment. No control separating "meaning changed" from "input perturbation" |
 | LangForce / BayesianVLA [2601.15197] | starVLA | Names the cause "information collapse"; trains to maximize conditional PMI | A training method; does not measure where existing models lose the information |
 | Not All Features… [2603.19233] | 6 VLAs (π0.5, X-VLA, SmolVLA…) | Injecting task A's activations into π0.5's action expert executes A in 99.6% of episodes; goal selection and motor generation are split between the VLM and the action expert; all models encode the instruction | No quantity comparable to behavior; no time dimension |
-| Do VLAs Understand Instructions? [2610.10178] (2026-10-07) | π0.5, GR00T N1.7 | Activation/attribution patching on the action module's residual stream; insensitive to rephrasing and to nonexistent objects, sensitive to directional language and empty instructions; for GR00T, causal effect and representational geometry dissociate | **Per layer only, not per time step**; suites not stated (per the abstract); no information quantities |
-| Instructions Retrieve Trajectories [2609.39971] (2026-09-30) | π0.5, GR00T N1.7 | Language is used but not bound to the action ("instruction-keyed"); proposes ECT | Does not test **which word** is the retrieval key, and does not test compositional new goals in a fixed scene |
+| [Do VLAs Understand Instructions? (2610.10178v1)](https://arxiv.org/html/2610.10178v1) | π0.5, GR00T N1.7 | Offline LIBERO-10 patching and CKA; full-text notes in RESEARCH_PLAN §2.3 | No closed-loop, phase-aligned instruction-switching evaluation |
+| [When Instructions Retrieve Trajectories (2609.39971v1)](https://arxiv.org/html/2609.39971v1) | π0.5, GR00T N1.7 | Behavioral and internal-state interventions; ECT; full-text notes in RESEARCH_PLAN §2.3 | Verb/object/destination changes are already tested; the remaining question here is phase-dependent redirection and matched-state default destinations |
 | Scrubbing Visual Cues [2610.10912] (2026-10-07) | several | Visual shortcuts enter the action representation in early layers; later layers correct with language to different degrees; proposes the rollout-free metric action margin | Training method; abstract only |
 | SwitchVLA [2506.03574] | — | Mid-execution instruction switching usually fails; adding contact-phase information raises switching success from 0% to 95.8% | A training method; supports the hypothesis that language has stopped being read after contact, but not measured on existing models |
 | ProbeAct [2606.09740] | OpenVLA-OFT | Hidden-state probes predict object positions; failure detection by grasp/transport/place phase | Not about language, but its phase state machine can be reused |
@@ -54,10 +55,10 @@ E3 separates these two.
 | # | Gap | Why it is real | Corresponding experiment |
 |---|---|---|---|
 | G1 | **No common unit**. Every paper reports success-rate drops under different perturbations, so they cannot be compared across models or benchmarks | §1: all the behavioral papers use success rate; LIBERO-CF uses accuracy | E1 behavioral bits (bounded above by log₂10, with confusion matrix) |
-| G2 | **Information present vs used** has never been measured in the same units across architectures | 2603.19233 says "it is encoded"; 2609.39971 says "it is not bound". Neither quantifies how much is present and how much is used | E5 representation bits vs E1 behavioral bits |
-| G3 | **The time dimension**: when language is read | 2610.10178 is per layer; SwitchVLA is a training method; nobody measures commitment time on existing models | E2 sensitivity S(t) + E4 switching the instruction at τ |
+| G2 | **Bit-scale comparison of representation and behavior** (deferred) | The two fully read papers already quantify readouts or intervention effects; see the revised scope in RESEARCH_PLAN §2.2 | E5 representation bits vs E1 behavioral bits |
+| G3 | **The time dimension**: when language can still redirect behavior | Neither fully read paper measures phase-aligned instruction-switching curves; broader priority remains to be checked | E4 switching at τ; E2 as needed |
 | G4 | **Is paraphrase failure about meaning or about perturbation?** And at which phase? | LIBERO-Para has no matched-distance control; it attributes failure to planning, but your data shows post-grasp failure | E3 state-branching + E6 representation invariance |
-| G5 | **Key or program**: which words determine which trajectory gets retrieved | 2609.39971 describes "keying" but does not test what the key is; LIBERO-Para finds object words matter most, but only through success rate | E7 compositional new goals + executed-task analysis |
+| G5 | **Default destinations after destination-word failure** | Word-category interventions are already covered; focus on matched intermediate states, timing, and comparison with empty instructions | E3 nonce-word branches; E7 deferred |
 | G6 | **Data vs architecture**: is this a property of the model or of the training data? | Public checkpoints already provide a natural experiment (§4: OFT has both per-suite and four-suite-joint versions) | Every experiment runs on both |
 
 ---
@@ -108,7 +109,7 @@ Covers three action-generation families. **Tier 1** is required; Tier 2 is added
 | 1 | VLA-Adapter (Qwen2.5-0.5B) | `VLA-Adapter/LIBERO-Goal-Pro` @2ae84b8 | Parallel L1 regression, bridge attention | Already wired in; small and fast; deterministic |
 | 1 | OpenVLA-OFT (Llama2-7B), **Goal only** | `moojink/openvla-7b-oft-finetuned-libero-goal` @c2d0f9f | Parallel L1, bidirectional attention | VLA-Adapter derives from the OFT code, so the adapter is nearly reused |
 | 1 | OpenVLA-OFT, **four suites joint** | `moojink/openvla-7b-oft-finetuned-libero-spatial-object-goal-10` | Same as above | **Natural experiment for G6**: same architecture, different language entropy in training data |
-| 1 | π0.5 (LeRobot PyTorch) | `lerobot/pi05_libero_finetuned_v044` | VLM + flow-matching action expert | The model 2610.10178 / 2609.39971 / LIBERO-CF all study, so results are directly comparable; stochastic sampling, so it naturally yields distributions |
+| 1 | π0.5 (LeRobot PyTorch) | `lerobot/pi05_libero_finetuned_v044` | VLM + flow-matching action expert | Shared model family with the two fully read papers; checkpoint, suite, and metric differences prevent direct score comparison; stochastic sampling yields distributions |
 | 2 | SmolVLA | `HuggingFaceVLA/smolvla_libero` | Small VLM + flow expert | Small and cheap |
 | 2 | GR00T N1.7 | `nvidia/gr00t17-lerobot-libero_goal-640` | Cross-attention action module | Also studied by 2610.10178 / 2609.39971 |
 | 2 | X-VLA | `lerobot/xvla-libero` | Soft prompt + flow | Also studied by 2603.19233 |
