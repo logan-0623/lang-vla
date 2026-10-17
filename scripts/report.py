@@ -84,6 +84,15 @@ def e3_section(since):
             print("  redirect after grasp (new instructed goal executed / original kept / other):")
             for (t, j), c in sorted(red.items()):
                 print(f"    t{t} {GOALS[t]:<18} -> {GOALS[j]:<18} new {c['new']:>3}  orig {c['orig']:>3}  other {c['other']:>3}")
+        print("  source paraphrase per task: text | orig->para_source executed | para->orig executed")
+        for t in sorted({e["task_id"] for e in eps}):
+            src = [e for e in eps if e["task_id"] == t and e["cont"] == "para_source"]
+            for text in sorted({e["cont_text"] for e in src}):
+                ex = lambda sc, cont: Counter(GOALS[e["executed"]] if e["executed"] is not None else e["outcome"]
+                                              for e in eps if e["task_id"] == t and e["source"] == sc and e["cont"] == cont
+                                              and (cont != "para_source" or e["cont_text"] == text))
+                print(f"    t{t} [{src[0]['cont_cat']}] \"{text}\"\n        orig->para_source {dict(ex('orig', 'para_source'))}"
+                      f"\n        para->orig        {dict(ex('para', 'orig'))}")
         emp = defaultdict(Counter)
         for e in eps:
             if e["cont"] == "empty":
@@ -92,6 +101,28 @@ def e3_section(since):
             print("  empty instruction after grasp, executed:")
             for t, c in sorted(emp.items()):
                 print(f"    t{t} {GOALS[t]:<18} " + ", ".join(f"{k} {v}" for k, v in c.most_common()))
+
+
+def e4_section(since):
+    print("\n######## E4 (switch time; 'new' = the switched-to goal was executed) ########")
+    for d in sorted(R.glob("e4/*")):
+        if not ts_ok(d, since) or not (d / "episodes.jsonl").exists():
+            continue
+        eps = [json.loads(l) for l in open(d / "episodes.jsonl")]
+        det = json.loads((d / "determinism.json").read_text()) if (d / "determinism.json").exists() else {}
+        print(f"{d.name}: {len(eps)} branches, orig==orig_rep {det.get('n_identical', '?')}/{len(det.get('orig_vs_orig_rep', []))}")
+        taus = sorted({e["tau"] for e in eps}, key=lambda t: -10**6 if t == "start" else t)
+        print(f"  {'task -> switched-to goal':<44}" + "".join(f"{str(t):>9}" for t in taus))
+        keys = sorted({(e["task_id"], e["cont"], e["cont_goal"]) for e in eps if e["cont"] in ("other", "empty", "orig")},
+                      key=lambda k: (k[0], k[1], -1 if k[2] is None else k[2]))
+        for t, cont, j in keys:
+            cells = []
+            for tau in taus:
+                xs = [e for e in eps if (e["task_id"], e["cont"], e["cont_goal"], e["tau"]) == (t, cont, j, tau)]
+                hit = sum(e["executed"] == (t if cont in ("orig", "empty") else j) for e in xs)
+                cells.append(f"{hit}/{len(xs)}" if xs else "-")
+            label = f"t{t} {GOALS[t]} -> " + (GOALS[j] if cont == "other" else cont + " (keeps orig)")
+            print(f"  {label:<44}" + "".join(f"{c:>9}" for c in cells))
 
 
 def e6_section(since):
@@ -132,5 +163,6 @@ if __name__ == "__main__":
     a = ap.parse_args()
     eval_section()
     e3_section(a.since)
+    e4_section(a.since)
     e6_section(a.since)
     para_section()
