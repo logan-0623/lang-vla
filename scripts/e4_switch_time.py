@@ -37,6 +37,9 @@ def main() -> None:
     ap.add_argument("--n_states", type=int, default=20, help="source rollouts with a stable grasp per task")
     ap.add_argument("--max_attempts", type=int, default=40)
     ap.add_argument("--taus", default=DEFAULT_TAUS)
+    ap.add_argument("--post_fracs", default="",
+                    help="also switch at g + q*(P - g), P = step the source rollout first satisfies its goal (e.g. 0.25,0.5,0.75); "
+                         "fixed +k steps can land after placement (2026-10-17 E4 +20 check)")
     ap.add_argument("--hold_steps", type=int, default=10)
     ap.add_argument("--lift_m", type=float, default=0.03)
     ap.add_argument("--grasp_k", type=int, default=5)
@@ -54,6 +57,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=False)
     taus = [t if t == "start" else int(t) for t in args.taus.split(",")]
     post = max([t for t in taus if t != "start"] + [0])
+    fracs = [float(q) for q in args.post_fracs.split(",") if q]
 
     policy, make_env, get_init_states, max_steps = load(args.backend, args.checkpoint, args.suite, args.seed)
     suite = benchmark.get_benchmark_dict()[args.suite]()
@@ -85,21 +89,25 @@ def main() -> None:
             snaps = [snapshot(env)]                                   # snaps[t] = state after t policy steps
             det = GraspDetector(object_z(env, target), args.lift_m, args.grasp_k)
             stop_at = [None]
+            src = GoalTracker(len(goals), args.hold_steps, prefer=tid)
 
             def on_step(t, o):
                 snaps.append(snapshot(env))
+                src.update(satisfied(env, goals), t)
                 if det.update(object_z(env, target), is_grasped(env, target), t) and stop_at[0] is None:
                     stop_at[0] = t + post
-                return stop_at[0] is not None and t >= stop_at[0]
+                return stop_at[0] is not None and t >= stop_at[0] and (not fracs or src.executed is not None)
 
             res = rollout(env, policy, task.language, obs, steps=max_steps, on_step=on_step)
             g = det.stable_step
-            if res["error"] or g is None or len(snaps) <= g + post:
+            place = src.first_satisfied.get(tid) if src.executed == tid else None
+            if res["error"] or g is None or len(snaps) <= g + post or (fracs and (place is None or place <= g)):
                 continue
             n_ok += 1
-            for tau in taus:
-                t_abs = 0 if tau == "start" else g + tau
-                if t_abs < 0:
+            points = [(tau, 0 if tau == "start" else g + tau) for tau in taus]
+            points += [(f"q{q:g}", g + round(q * (place - g))) for q in fracs]
+            for tau, t_abs in points:
+                if t_abs < 0 or t_abs >= len(snaps):
                     continue
                 snap = snaps[t_abs]
                 orig_actions = {}
@@ -111,13 +119,15 @@ def main() -> None:
                     if kind in ("orig", "orig_rep"):
                         orig_actions[kind] = r["actions"]
                     episodes.write(json.dumps({
-                        "task_id": tid, "task": task.language, "init": k, "grasp_step": g, "tau": tau, "t_abs": t_abs,
+                        "task_id": tid, "task": task.language, "init": k, "grasp_step": g, "place_step": place,
+                        "tau": tau, "t_abs": t_abs,
                         "cont": kind, "cont_goal": goal_id, "cont_text": text, "executed": tracker.executed,
                         "executed_step": tracker.executed_step,
                         "steps": r["steps"], "error": r["error"]}) + "\n")
                 episodes.flush()
                 checks.append({"task_id": tid, "init": k, "tau": tau, **divergence(orig_actions["orig"], orig_actions["orig_rep"])})
-            print(f"task {tid} init {k}: grasp at {g}, {len(taus)} switch times x {len(conts)} continuations", flush=True)
+            print(f"task {tid} init {k}: grasp at {g}, place at {place}, {len(points)} switch times x {len(conts)} continuations",
+                  flush=True)
             if n_ok >= args.n_states:
                 break
         collection.append({"task_id": tid, "attempts": k + 1, "grasped": n_ok})

@@ -20,7 +20,29 @@ class UpstreamPolicy:
         kw = {"use_pro_version": True} if self.is_adapter else {"center_crop": True}
         self.cfg = GenerateConfig(pretrained_checkpoint=checkpoint, task_suite_name=suite,
                                   use_proprio=True, num_images_in_input=2, **kw)
-        self.model, self.action_head, self.proprio_projector, _, self.processor = initialize_model(self.cfg)
+        # Upstream's get_vla rewrites <checkpoint>/config.json in place (update_auto_map). Jobs starting together on one
+        # checkpoint raced on it (JSONDecodeError on an empty file, E4 jobs 49344275/7): serialize loading per checkpoint.
+        # The lock is an O_EXCL-created file (atomic on Lustre/Ocean, where flock may be unsupported); a lock older than
+        # 15 min is treated as left behind by a killed job.
+        import os
+        import time
+        from pathlib import Path
+        lock = Path(checkpoint) / ".langvla-load.lock"
+        while True:
+            try:
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - lock.stat().st_mtime > 900:
+                        lock.unlink()
+                except FileNotFoundError:
+                    pass
+                time.sleep(5)
+        try:
+            self.model, self.action_head, self.proprio_projector, _, self.processor = initialize_model(self.cfg)
+        finally:
+            lock.unlink(missing_ok=True)
         self._prepare, self._process, self._get_action = prepare_observation, process_action, get_action
         self._resize = get_image_resize_size(self.cfg)
         self.deterministic = True     # L1-regression heads: no sampling

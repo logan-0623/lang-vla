@@ -65,7 +65,7 @@ def judge_h1():
     by_model = defaultdict(list)
     for d in sorted(R.glob("e4/*")):
         f = d / "episodes.jsonl"
-        if f.exists():
+        if f.exists() and not d.name.startswith("frac-"):
             by_model[model_of(d.name)] += [json.loads(l) for l in open(f)]
     for model, eps in sorted(by_model.items()):
         eps = [e for e in eps if e["cont"] == "other" and not e["error"]]
@@ -92,6 +92,42 @@ def judge_h1():
         print(f"  refute (a) no bowl/wine difference at every tau >= -10: {ra} | (b) bowl f(+20) <= 0.3: {rb} | "
               f"(c) both f(start) <= 0.3: {rc}")
         print(f"  => H1' {'REFUTED' if ra or rb or rc else 'SUPPORTED' if p1 and p2 and p3 else 'NOT SUPPORTED (no refutation)'}")
+
+
+def judge_h1pp():
+    """H1'' (RESEARCH_PLAN §3.3): switch times as fractions q of the grasp -> placement interval, dirs e4/frac-*."""
+    print("\n================ H1'' (E4, placement-relative switch times) ================")
+    by_model = defaultdict(list)
+    for d in sorted(R.glob("e4/frac-*")):
+        f = d / "episodes.jsonl"
+        if f.exists():
+            by_model[model_of(d.name)] += [json.loads(l) for l in open(f)]
+    for model, eps in sorted(by_model.items()):
+        f, base = {}, {}
+        for obj, goals in (("bowl", BOWL), ("wine", WINE)):
+            for tau in (0, "q0.25", "q0.5", "q0.75"):
+                units, ou = defaultdict(list), defaultdict(list)
+                for e in eps:
+                    if e["error"] or e["task_id"] not in goals or e["tau"] != tau:
+                        continue
+                    if e["cont"] == "other" and e["cont_goal"] in goals:
+                        units[(e["task_id"], e["init"])].append(e["executed"] == e["cont_goal"])
+                    if e["cont"] == "orig":
+                        ou[(e["task_id"], e["init"])].append(e["executed"] == e["task_id"])
+                f[obj, tau] = boot(units, frac) if units else (np.nan,) * 3
+                base[obj, tau] = boot(ou, frac) if ou else (np.nan,) * 3
+        print(f"--- {model}")
+        for obj in ("bowl", "wine"):
+            print(f"  f({obj}):    " + "  ".join(f"{t}: {fmt(f[obj, t])}" for t in (0, "q0.25", "q0.5", "q0.75")))
+            print(f"  orig({obj}): " + "  ".join(f"{t}: {fmt(base[obj, t])}" for t in (0, "q0.25", "q0.5", "q0.75")))
+        p1 = f["bowl", "q0.25"][0] >= 0.5
+        p2 = f["bowl", "q0.75"][2] < f["bowl", "q0.25"][1]
+        p3 = f["wine", "q0.25"][0] <= 0.2
+        ra = f["bowl", "q0.25"][0] <= 0.2
+        rb = not apart(f["bowl", "q0.25"], f["wine", "q0.25"])
+        print(f"  P1 bowl f(q0.25) >= 0.5: {p1} | P2 bowl f(q0.75) < f(q0.25), CIs apart: {p2} | P3 wine f(q0.25) <= 0.2: {p3}")
+        print(f"  refute (a) bowl f(q0.25) <= 0.2: {ra} | (b) bowl and wine f(q0.25) CIs overlap: {rb}")
+        print(f"  => H1'' {'REFUTED' if ra or rb else 'SUPPORTED' if p1 and p2 and p3 else 'NOT SUPPORTED (no refutation)'}")
 
 
 def judge_h3():
@@ -160,4 +196,5 @@ def judge_h3():
 
 if __name__ == "__main__":
     judge_h1()
+    judge_h1pp()
     judge_h3()

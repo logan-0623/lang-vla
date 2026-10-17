@@ -111,7 +111,8 @@ def e4_section(since):
         eps = [json.loads(l) for l in open(d / "episodes.jsonl")]
         det = json.loads((d / "determinism.json").read_text()) if (d / "determinism.json").exists() else {}
         print(f"{d.name}: {len(eps)} branches, orig==orig_rep {det.get('n_identical', '?')}/{len(det.get('orig_vs_orig_rep', []))}")
-        taus = sorted({e["tau"] for e in eps}, key=lambda t: -10**6 if t == "start" else t)
+        taus = sorted({e["tau"] for e in eps},
+                      key=lambda t: -10**6 if t == "start" else 10**5 + float(t[1:]) if isinstance(t, str) else t)
         print(f"  {'task -> switched-to goal':<44}" + "".join(f"{str(t):>9}" for t in taus))
         keys = sorted({(e["task_id"], e["cont"], e["cont_goal"]) for e in eps if e["cont"] in ("other", "empty", "orig")},
                       key=lambda k: (k[0], k[1], -1 if k[2] is None else k[2]))
