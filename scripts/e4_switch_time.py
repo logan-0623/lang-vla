@@ -110,6 +110,12 @@ def main() -> None:
                 if t_abs < 0 or t_abs >= len(snaps):
                     continue
                 snap = snaps[t_abs]
+                # State at the switch, for matching against the demonstrations (data-divergence map D(s)).
+                o_sw = restore(env, snap)
+                feat = {"eef_pos": [float(v) for v in o_sw["robot0_eef_pos"]],
+                        "gripper_qpos": [float(v) for v in o_sw["robot0_gripper_qpos"]],
+                        "target_pos": [float(v) for v in env.env.sim.data.body_xpos[env.env.obj_body_id[target]]],
+                        "target_grasped": bool(is_grasped(env, target))}
                 orig_actions = {}
                 for kind, goal_id, text in conts:
                     tracker = GoalTracker(len(goals), args.hold_steps, prefer=goal_id if goal_id is not None else tid)
@@ -120,7 +126,7 @@ def main() -> None:
                         orig_actions[kind] = r["actions"]
                     episodes.write(json.dumps({
                         "task_id": tid, "task": task.language, "init": k, "grasp_step": g, "place_step": place,
-                        "tau": tau, "t_abs": t_abs,
+                        "tau": tau, "t_abs": t_abs, "switch_state": feat,
                         "cont": kind, "cont_goal": goal_id, "cont_text": text, "executed": tracker.executed,
                         "executed_step": tracker.executed_step,
                         "steps": r["steps"], "error": r["error"]}) + "\n")
