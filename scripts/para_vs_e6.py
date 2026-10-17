@@ -30,6 +30,7 @@ def main():
     ap.add_argument("--para", required=True, help="LIBERO-Para result dir (shard*/logs/eval*.json)")
     ap.add_argument("--e6", required=True, help="E6 result dir (rows.csv)")
     ap.add_argument("--boot", type=int, default=2000)
+    ap.add_argument("--para_csv", default=None, help="LIBERO-Para metadata (text-only baselines); default $PARA/metrics/...")
     a = ap.parse_args()
 
     succ = defaultdict(list)   # text -> [success]
@@ -62,6 +63,21 @@ def main():
     for c in sorted({cat[k] for k in keys}):
         m = np.array([cat[k] == c for k in keys])
         print(f"  {c:<6} n={m.sum():<5} success {y[m].mean():.3f}  AUC {auc(x[m & fail], x[m & ~fail]):.3f}")
+    # Text-only baselines from LIBERO-Para's own metadata: does a rollout-free *text* score predict failure as well?
+    import os
+    meta = Path(a.para_csv or Path(os.environ.get("PARA", ".")) / "metrics/libero_para_metadata.csv")
+    if meta.exists():
+        sim = {}
+        for r in csv.DictReader(open(meta)):
+            sim[r["new_instruction"].strip().lower()] = (float(r["structural_similarity"]), float(r["keyword_similarity"]))
+        ok = [i for i, k in enumerate(keys) if k in sim]
+        print(f"text-only baselines (n={len(ok)}; score = 1 - similarity, higher should mean more failure):")
+        for j, name in enumerate(("structural_similarity", "keyword_similarity")):
+            z = np.array([1 - sim[keys[i]][j] for i in ok])
+            f_ok = fail[ok]
+            print(f"  {name:<22} AUC {auc(z[f_ok], z[~f_ok]):.3f}")
+        xo = x[ok]
+        print(f"  R_action on the same rows  AUC {auc(xo[fail[ok]], xo[~fail[ok]]):.3f}")
     qs = np.quantile(x, [0, .2, .4, .6, .8, 1])
     print("success by R_action quintile:")
     for lo_, hi_ in zip(qs[:-1], qs[1:]):

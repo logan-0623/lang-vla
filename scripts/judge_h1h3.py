@@ -21,7 +21,9 @@ B = 2000
 
 
 def model_of(name):
-    return "oft" if "-oft" in name else "pi05" if "pi05" in name else "vla-adapter"
+    """Model from a result dir name: e4/oft-t1-..., e3/nonce-oft-..., .../pi05-..."""
+    parts = name.split("-")
+    return "oft" if "oft" in parts else "pi05" if "pi05" in parts else "vla-adapter"
 
 
 def boot(units, stat):
