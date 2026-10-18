@@ -17,6 +17,11 @@ from pathlib import Path
 import numpy as np
 
 
+def _batch(x):
+    """Add a leading batch dim of 1 to every array in a nested dict."""
+    return {k: _batch(v) for k, v in x.items()} if isinstance(x, dict) else np.asarray(x)[None]
+
+
 class LeRobotPolicy:
     def __init__(self, checkpoint: str, suite: str, *, device: str = "cuda", n_action_steps: int = 10,
                  compile_model: bool = False, seed: int = 7):
@@ -64,7 +69,9 @@ class LeRobotPolicy:
         from lerobot.envs.utils import preprocess_observation
         from lerobot.utils.constants import ACTION
         torch = self._torch
-        o = preprocess_observation(self._gym._format_raw_obs(obs))
+        # lerobot-eval steps a gym vector env, so every leaf arrives with a batch dim; LiberoProcessorStep
+        # (e.g. _quat2axisangle) requires it. Add it here, as the vector env's stacking would.
+        o = preprocess_observation(_batch(self._gym._format_raw_obs(obs)))
         o["task"] = [instruction]
         o = self.pre(self.env_pre(o))
         self.policy.reset()                                       # a (re)start always queries afresh
