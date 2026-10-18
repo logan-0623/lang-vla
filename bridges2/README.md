@@ -88,3 +88,32 @@ sbatch --export=ALL,SV_CKPT=/path/to/steps_N_pytorch_model.pt bridges2/run_starv
   python scripts/eval_goals.py --backend starvla --checkpoint SERVER --n_init 50 --out $RESULTS/novel/<arm>-$(date +%m%d%H%M)
 ```
 The QA data is generated here and trained on at DeltaAI: copy `$STORE/qa/goal-v1` to DeltaAI's `$STORE/qa/goal-v1`.
+
+## StarVLA training (RESEARCH_PLAN §11.2, budget and order §8.3)
+
+`bridges2/train_starvla.sbatch`: 4 x L40S on GPU-shared (4 SU per wall hour), global batch 4 x 8 x accum 4 = 128.
+Data: `bash scripts/download_starvla_assets.sh bridges2` also fetches the LIBERO-Goal LeRobot set; QA data is
+`$STORE/qa/goal-v1` (built with `--px_convention col`).
+
+Smoke first (s/step and memory; fill §8.3 from the logged step times):
+```bash
+sbatch -t 1:00:00 --export=ALL,STAGE=vlm,QA=lang,MAX_STEPS=30,SAVE=30 bridges2/train_starvla.sbatch
+sbatch -t 1:00:00 --export=ALL,STAGE=vla,MAX_STEPS=30,SAVE=30 bridges2/train_starvla.sbatch
+```
+
+| arm | stage 1 (VLM SFT) | stage 2 (VLA, LIBERO-Goal) |
+|---|---|---|
+| A | — | `STAGE=vla` |
+| B | `STAGE=vlm,QA=lang` | `STAGE=vla,TAG=lang,INIT=<B stage-1 .pt>` |
+| C | `STAGE=vlm,QA=ctrl` | `STAGE=vla,TAG=ctrl,INIT=<C stage-1 .pt>` |
+| D | `STAGE=vlm,QA=num` | `STAGE=vla,TAG=num,INIT=<D stage-1 .pt>` |
+| A+co | — | `STAGE=vla,COTRAIN=lang` |
+| B+co | as B | `STAGE=vla,TAG=lang,INIT=<B stage-1 .pt>,COTRAIN=lang` |
+
+Runs land in `$STORE/runs/starvla/<run>/checkpoints/steps_N_pytorch_model.pt` (~10 GB each). Evaluate a stage-2
+checkpoint with `run_starvla.sbatch` (`SV_CKPT=` that .pt; `eval_goals.py --n_init 50`), and held-out QA accuracy
+at the three points (raw VLM, after stage 1, after stage 2) with
+```bash
+sbatch -t 3:00:00 --export=ALL,ENV=starvla bridges2/run.sbatch python scripts/eval_qa.py \
+  --base $STORE/ckpt/Qwen3-VL-4B-Instruct [--ckpt <.pt>] --qa_dir $STORE/qa/goal-v1 --style lang --out $RESULTS/qa/<tag>
+```

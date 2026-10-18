@@ -1,5 +1,8 @@
 # DeltaAI (aarch64 GH200, 4 x H100 per node): training
 
+> 2026-10-18: no DeltaAI allocation; all training currently runs on Bridges-2 (`bridges2/train_starvla.sbatch`, see
+> `bridges2/README.md`). These scripts are kept for a future allocation.
+
 Set `ACCOUNT` in `deltaai/config.sh` (`accounts` on a login node). Submit from the repo root.
 
 ## StarVLA arms (RESEARCH_PLAN §11; current priority)

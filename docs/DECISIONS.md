@@ -182,3 +182,9 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - Train / held-out split by scene (scene % 5 == 4 held out), so neighbouring frames never straddle the split. StarVLA's eval set is now the held-out file; `eval_qa.py` measures held-out accuracy of the raw VLM, after stage 1 and after stage 2.
 - Arm C's answers are full sentences so their length is close to arm B's; arm D's next-step answer carries the object, like B's sentence.
 - Overlay check (2026-10-18, 4 frames of goal-v1, tasks 0-2): the `col` convention (flip the column only) lands on the bowl, plate, cream cheese and wine bottle (bottle origin at its base); `none`, `row`, `both` miss. So the first collect's both-axes flip was wrong, as robosuite's convention predicted. Fixture body origins are not their visual centres (the stove's is on its back knob), so position / left-right / distance questions use the four movable objects only; fixtures remain as supports ("resting on the stove").
+
+## 2026-10-18 All work on Bridges-2, including StarVLA training
+
+- No DeltaAI account or allocation. Training runs on Bridges-2: 4 x L40S-48GB on GPU-shared (`bridges2/train_starvla.sbatch`, 4 SU per wall hour). The deltaai/ scripts stay for a future allocation.
+- Global batch 128 = 4 GPUs x 8 per device x accumulation 4 (the released runs: 8 x 16 x 1). StarVLA builds `Accelerator(DeepSpeedPlugin())`, so accumulation comes from the DeepSpeed config, not from `trainer.gradient_accumulation_steps`; the job writes a DeepSpeed config with `ACCUM`.
+- Stage-2 length 5000 optimizer steps (~12 epochs of LIBERO-Goal's ~52k frames at 128), not 20000 (~49 epochs): the released 4in1 recipe is ~10 epochs. Checkpoints at 2500 and 5000 check under/over-training. Budget order and the stop rule are in RESEARCH_PLAN §8.3.

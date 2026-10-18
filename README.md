@@ -23,7 +23,7 @@ current vision-language-action models actually use their instructions? Evaluatio
   | `report.py`, `per_task.py`, `diag_restore.py` | reports and diagnostics |
   | `setup_pion.sh`, `setup_starvla.sh`, `download_starvla_assets.sh` | code and envs |
 - `configs/`: paraphrase / nonce-word sets, novel goals, StarVLA training config
-- `bridges2/`: PSC Bridges-2 (x86, L40S): evaluation. `deltaai/`: NCSA DeltaAI (aarch64 GH200): training
+- `bridges2/`: PSC Bridges-2 (x86, L40S): evaluation and, since 2026-10-18, StarVLA training. `deltaai/`: NCSA DeltaAI (aarch64 GH200), kept for a future allocation
 - `patches/`: our changes to Pion's VLA-Adapter copy and to LIBERO-Para
 
 ## Setup
