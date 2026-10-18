@@ -44,7 +44,7 @@ def main() -> None:
     ap.add_argument("--lift_m", type=float, default=0.03)
     ap.add_argument("--grasp_k", type=int, default=5)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot"],
+    ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot", "starvla"],
                     help="upstream: VLA-Adapter/OFT (vla env, repo on PYTHONPATH); lerobot: pi0.5 etc. (lerobot env)")
     args = ap.parse_args()
     if args.suite != "libero_goal":

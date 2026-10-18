@@ -160,3 +160,13 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - `env.reset()` re-samples fixture placement from numpy's global RNG, so in one process the scene for init k depended on how many resets ran before it. E4 runs with different tau lists (batch_1017 vs batch_1017c frac) disagreed on 98 / 928 tau=0 pairs for the same (task, init, continuation). Each run's restores were still exact; the source scenes were different samples.
 - Fix: `settle(..., seed=seed*100000 + task*1000 + init)` seeds numpy before the reset (E3 and E4). From now on the same init is the same scene and source rollout in every design, which the before/after fine-tuning comparison needs. Earlier results stay valid as independent samples and are not paired across runs.
 - E3 grasp collection now prints rollout errors (the pi0.5 pilot found 0 grasp states in 40 attempts with no message).
+
+## 2026-10-18 Spatial-language transfer study: StarVLA + Qwen3-VL
+
+- Backbone: Qwen3-VL-4B-Instruct, not a hand-assembled MoonViT-V2 + Qwen3-4B (MoonViT-V2 is trained jointly with Kimi K3's LM; pairing it with Qwen3 would need a new large vision-language alignment run). Qwen3-VL-4B is also VLM³'s base.
+- Codebase: StarVLA @ 985c223 (starVLA_dev), QwenOFT (deterministic L1 head, so E3/E4 bitwise checks still apply). Released `StarVLA/Qwen3-VL-OFT-LIBERO-4in1` (Goal 96.2 published) validates our client before any training. Our own runs train on LIBERO-Goal only: 4-in-1 data includes LIBERO-10, which would make some "novel" combinations not novel.
+- Attention `sdpa` in training and serving: no flash-attn wheel for aarch64 + torch 2.6 on DeltaAI, and one implementation on both clusters. decord / pytorch3d are dropped from StarVLA's requirements (no aarch64 wheels, unused with video_backend torchvision_av).
+- Serving: the model runs in the `starvla` env behind StarVLA's own websocket server; the LIBERO client is `langeval/adapters/starvla.py` in the `vla` env, so all models share one simulator build (mujoco 2.3.7). The client copies StarVLA's LIBERO eval preprocessing exactly (flip, 224 resize, no state, open-loop chunk, gripper binarization).
+- Novel goals reuse the shared LIBERO-Goal scene (all 10 bddl files share regions/objects/init) with new goal predicates; no new bddl files, no new init states.
+- QA data comes from fresh random placements (`env.reset()` with seeds disjoint from evaluation), never from the eval init states.
+- Knowledge-insulation (stop-gradient into the VLM) is not implemented: with an OFT head it reduces to a frozen-for-actions VLM; the faithful version needs discrete action tokens (FAST). Revisit if co-training (A+co) helps.

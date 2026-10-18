@@ -2,6 +2,7 @@
 
   upstream: VLA-Adapter / OpenVLA-OFT (repo first on PYTHONPATH, `vla` env)
   lerobot:  pi0.5 / SmolVLA / X-VLA (`lerobot` env)
+  starvla:  StarVLA (Qwen3-VL) via its policy server; `checkpoint` is host:port (`vla` env, StarVLA repo on PYTHONPATH)
 """
 from __future__ import annotations
 
@@ -26,4 +27,19 @@ def load(backend: str, checkpoint: str, suite: str, seed: int):
         # LeRobot's loader passes weights_only=False (init states are numpy pickles; torch >= 2.6 refuses them).
         return (policy, lambda s, i: policy.make_env(s, i, suite), lambda s, i: get_task_init_states(s, i),
                 TASK_SUITE_MAX_STEPS[suite])
+    if backend == "starvla":
+        from langeval.adapters.starvla import StarVLAPolicy, make_env
+        np_seed(seed)
+        return (StarVLAPolicy(checkpoint, suite), make_env, lambda s, i: s.get_task_init_states(i), MAX_STEPS[suite])
     raise ValueError(f"unknown backend {backend!r}")
+
+
+# Upstream LIBERO eval episode lengths (TASK_MAX_STEPS in OpenVLA-OFT / VLA-Adapter, StarVLA's eval_libero.py).
+MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520, "libero_90": 400}
+
+
+def np_seed(seed: int) -> None:
+    import random
+    import numpy as np
+    random.seed(seed)
+    np.random.seed(seed)

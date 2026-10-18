@@ -74,6 +74,14 @@ def load_goals(suite_name: str, task_ids: list[int] | None = None) -> list[Goal]
     return goals
 
 
+def load_novel_goals(path: str) -> list[Goal]:
+    """Goals defined only by predicates (configs/novel_goals.json), evaluated in the shared LIBERO-Goal scene."""
+    import json
+    movable = {"akita_black_bowl_1", "cream_cheese_1", "wine_bottle_1", "plate_1"}   # LIBERO-Goal (:objects)
+    return [Goal(g["language"], g["predicates"], goal_target(g["predicates"], movable))
+            for g in json.load(open(path))["goals"]]
+
+
 def satisfied(env, goals: list[Goal]) -> list[bool]:
     """Whether each goal's predicates all hold now. `env` is LIBERO's OffScreenRenderEnv."""
     inner = env.env
