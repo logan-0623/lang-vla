@@ -2,6 +2,7 @@
 
 > Written 2026-10-13. The literature section is based on arXiv abstracts and search snippets **as of 2026-10-13**. Anything marked "per the abstract" has not been checked against the full paper. Read the full paper before citing it in a paper of our own.
 > Full-text update: 2609.39971v1 and 2610.10178v1 have now been read, including appendices. Their corrected scope and the current research priorities are recorded in [RESEARCH_PLAN.md, §2.3](RESEARCH_PLAN.md). Other literature claims below remain preliminary.
+> 2026-10-18: the main question has moved to transfer of spatial-language knowledge into action (Qwen3-VL / StarVLA); see [RESEARCH_PLAN.md, §11](RESEARCH_PLAN.md). This document remains the design record for phase 1 (E0–E8).
 > All cost figures are estimates. They must be recalibrated with the measured throughput from E0.
 
 ---

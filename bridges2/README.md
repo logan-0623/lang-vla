@@ -59,3 +59,30 @@ sbatch --array=0-7 --export=ALL,MODEL=vla-adapter,CKPT_NAME=LIBERO-Goal-Pro,NSHA
 
 GPU choice: L40S (24 CPU cores per GPU, 1 SU/GPU-h). H100 costs 2 SU/GPU-h for no gain on CPU-bound rollouts;
 override with `sbatch --gpus=h100-80:1 ...` if the 3 L40S nodes are congested. Avoid V100: no bf16.
+
+## Spatial-language transfer study (RESEARCH_PLAN §11)
+
+StarVLA runs in its own `starvla` env behind StarVLA's websocket policy server; the LIBERO client
+(`--backend starvla`) runs in the `vla` env, so every model uses the same simulator build. `run_starvla.sbatch` starts
+the server, waits for it, then runs one client command; the literal argument `SERVER` becomes its host:port.
+
+| # | Command | What it checks | ~SU |
+|---|---|---|---|
+| 8 | `srun -A cis260349p -p GPU-shared --gpus=l40s-48:1 -t 1:30:00 --pty bash scripts/setup_starvla.sh bridges2` | `starvla` env, QA sets registered, client importable from `vla` | 1.5 |
+| 9 | `bash scripts/download_starvla_assets.sh bridges2` (login node) | Qwen3-VL-4B-Instruct + released `Qwen3-VL-OFT-LIBERO-4in1` (~20 GB) | 0 |
+| 10 | `bash bridges2/batch_1018b.sh` | novel-goal baseline (N0) for 4 models, StarVLA adapter validation, QA data v1 | ~15–25 |
+
+Gates in `batch_1018b`, before any StarVLA training:
+- `novel-starvla4in1`: the 10 seen tasks (`s0`–`s9` in `summary.json`) should be close to the published Goal 96.2%.
+- `e3-starvla-pilot`: `restore_obs_equal: true` and `orig_vs_orig_rep` identical on every state.
+- `qa-goal-v1`: open a few images with their `frames.jsonl` facts and check the image coordinates (the training
+  images are flipped `[::-1, ::-1]`; positions are projected after the same flip).
+
+Novel goals alone, for any backend:
+```bash
+sbatch --export=ALL,ENV=vla,REPO=vla-adapter bridges2/run.sbatch \
+  python scripts/eval_goals.py --checkpoint $CKPT/LIBERO-Goal-Pro --sets novel --n_init 50 --out $RESULTS/novel/va-$(date +%m%d%H%M)
+sbatch --export=ALL,SV_CKPT=/path/to/steps_N_pytorch_model.pt bridges2/run_starvla.sbatch \
+  python scripts/eval_goals.py --backend starvla --checkpoint SERVER --n_init 50 --out $RESULTS/novel/<arm>-$(date +%m%d%H%M)
+```
+The QA data is generated here and trained on at DeltaAI: copy `$STORE/qa/goal-v1` to DeltaAI's `$STORE/qa/goal-v1`.
