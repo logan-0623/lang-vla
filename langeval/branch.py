@@ -18,8 +18,14 @@ import numpy as np
 DUMMY_ACTION = [0, 0, 0, 0, 0, 0, -1]
 
 
-def settle(env, init_state, wait_steps: int = 10):
-    """Upstream episode start: restore an init state, then let objects settle with no-op actions."""
+def settle(env, init_state, wait_steps: int = 10, seed: int | None = None):
+    """Upstream episode start: restore an init state, then let objects settle with no-op actions.
+
+    The reset re-samples fixture placement from numpy's global RNG, so without `seed` the same init state gives a
+    different scene depending on how many resets ran before it in the process. Pass a seed per (task, init) to make
+    source rollouts identical across runs with different designs."""
+    if seed is not None:
+        np.random.seed(seed)
     env.reset()
     obs = env.set_init_state(init_state)
     for _ in range(wait_steps):

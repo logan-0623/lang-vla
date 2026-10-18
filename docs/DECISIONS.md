@@ -154,3 +154,9 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - Init states come from LeRobot's loader (weights_only=False; hf-libero's own `get_task_init_states` fails under torch >= 2.6).
 - Noise: the k-th inference of each (re)started rollout uses torch seed (seed, k), reset by `policy.begin()` in `branch.rollout`. Continuations from one state share noise draws (common random numbers), so orig vs orig_rep stays a bitwise check and instruction contrasts are not diluted by sampling noise. Independent replicates = different `--seed`.
 - **Status: implemented, not yet validated on the cluster.** Next step is the E3 pilot (tasks 2, 4; 3 states per source) with three gates before any full run: two restores give identical observations; with the same noise seed, one observation gives identical actions twice; orig and orig_rep are bitwise identical. Until then no pi0.5 E3/E4 number is reported.
+
+## 2026-10-17 Fixture placement seeded per (task, init)
+
+- `env.reset()` re-samples fixture placement from numpy's global RNG, so in one process the scene for init k depended on how many resets ran before it. E4 runs with different tau lists (batch_1017 vs batch_1017c frac) disagreed on 98 / 928 tau=0 pairs for the same (task, init, continuation). Each run's restores were still exact; the source scenes were different samples.
+- Fix: `settle(..., seed=seed*100000 + task*1000 + init)` seeds numpy before the reset (E3 and E4). From now on the same init is the same scene and source rollout in every design, which the before/after fine-tuning comparison needs. Earlier results stay valid as independent samples and are not paired across runs.
+- E3 grasp collection now prints rollout errors (the pi0.5 pilot found 0 grasp states in 40 attempts with no message).

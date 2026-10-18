@@ -128,10 +128,12 @@ def main() -> None:
             n_grasp = 0
             attempts = min(args.max_attempts, len(init_states))
             for k in range(attempts):
-                obs = settle(env, init_states[k])
+                obs = settle(env, init_states[k], seed=args.seed * 100_000 + tid * 1000 + k)
                 det = GraspDetector(object_z(env, target), args.lift_m, args.grasp_k)
                 res = rollout(env, policy, src_text, obs, steps=max_steps,
                               on_step=lambda t, o: det.update(object_z(env, target), is_grasped(env, target), t))
+                if res["error"] is not None:
+                    print(f"task {tid} source {src_kind} init {k}: rollout error {res['error']}", flush=True)
                 if res["error"] is None and det.stable_step is not None:
                     path = out / "states" / f"t{tid}-{src_kind}{len(states)}-init{k}.npz"
                     snap = snapshot(env)

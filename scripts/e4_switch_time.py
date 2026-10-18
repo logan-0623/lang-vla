@@ -85,7 +85,7 @@ def main() -> None:
 
         n_ok, k = 0, -1
         for k in range(min(args.max_attempts, len(init_states))):
-            obs = settle(env, init_states[k])
+            obs = settle(env, init_states[k], seed=args.seed * 100_000 + tid * 1000 + k)
             snaps = [snapshot(env)]                                   # snaps[t] = state after t policy steps
             det = GraspDetector(object_z(env, target), args.lift_m, args.grasp_k)
             stop_at = [None]
