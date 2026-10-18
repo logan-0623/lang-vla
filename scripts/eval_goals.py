@@ -1,9 +1,11 @@
 """Closed-loop success on the LIBERO-Goal tasks and on novel combinations of their objects and destinations
 (configs/novel_goals.json), recording which goal each rollout executed.
 
-Every goal of both sets is tracked in every rollout (langeval.goal_matrix.GoalTracker), so a failure on a novel
-goal says where the policy went instead: the seen goal on the same object (default destination / name
-retrieval), another object, or nothing.
+Success and stopping follow LIBERO's own `done`: the episode ends as soon as the *instructed* goal's predicates
+hold, or at the step limit. Every other goal of both sets is only recorded (held for `hold_steps` ->
+`completed`), never a reason to stop: an intermediate step can satisfy another goal (opening the top drawer is
+n7 on the way to n6 and to seen task 3). `executed` = the first other goal completed, for reading failures: the
+seen goal on the same object (default destination / name retrieval), another object, or nothing.
 
   python scripts/eval_goals.py --checkpoint $CKPT/LIBERO-Goal-Pro --n_init 20 --out $RESULTS/novel/va-...
   python scripts/eval_goals.py --backend starvla --checkpoint 127.0.0.1:6694 --sets novel --out ...
@@ -62,12 +64,19 @@ def main() -> None:
         for k in range(min(args.n_init, len(inits))):
             obs = settle(env, inits[k], seed=args.seed * 100_000 + gi * 1000 + k)
             tracker = GoalTracker(len(goals), args.hold_steps, prefer=gi)
-            r = rollout(env, policy, goals[gi].language, obs, steps=max_steps,
-                        on_step=lambda t, o: tracker.update(satisfied(env, goals), t))
-            ex = tracker.executed
+
+            def on_step(t, o):
+                sat = satisfied(env, goals)
+                tracker.update(sat, t)
+                return sat[gi]                        # LIBERO done: instructed goal holds now
+            r = rollout(env, policy, goals[gi].language, obs, steps=max_steps, on_step=on_step)
+            success = r["error"] is None and tracker.last[gi]
+            others = sorted((t, i) for i, t in tracker.completed.items() if i != gi)
             episodes.write(json.dumps({
-                "goal": names[gi], "language": goals[gi].language, "init": k,
-                "executed": None if ex is None else names[ex], "success": ex == gi, "executed_step": tracker.executed_step,
+                "goal": names[gi], "language": goals[gi].language, "init": k, "success": success,
+                "success_step": r["steps"] if success else None,
+                "executed": names[gi] if success else (names[others[0][1]] if others else None),
+                "completed_other": {names[i]: t for t, i in others},
                 "first_satisfied": {names[i]: t for i, t in tracker.first_satisfied.items()},
                 "steps": r["steps"], "error": r["error"]}) + "\n")
             episodes.flush()

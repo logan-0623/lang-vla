@@ -70,13 +70,15 @@ the server, waits for it, then runs one client command; the literal argument `SE
 |---|---|---|---|
 | 8 | `srun -A cis260349p -p GPU-shared --gpus=l40s-48:1 -t 1:30:00 --pty bash scripts/setup_starvla.sh bridges2` | `starvla` env, QA sets registered, client importable from `vla` | 1.5 |
 | 9 | `bash scripts/download_starvla_assets.sh bridges2` (login node) | Qwen3-VL-4B-Instruct + released `Qwen3-VL-OFT-LIBERO-4in1` (~20 GB) | 0 |
-| 10 | `bash bridges2/batch_1018b.sh` | novel-goal baseline (N0) for 4 models, StarVLA adapter validation, QA data v1 | ~15–25 |
+| 10 | `bash bridges2/batch_1018b.sh` | StarVLA E3 pilot (adapter determinism), QA collection (its four novel-goal jobs: cancel, see 11) | ~5–10 |
+| 11 | `bash bridges2/batch_1018c.sh` | novel-goal baseline (N0) for 4 models, StarVLA Goal success | ~10–15 |
+| 12 | `python scripts/make_spatial_qa.py build --dir $STORE/qa/goal-v1 --overlay 12 --px_convention <c>` (login node, `vla` env) | look at `overlay/*.png`: the colour sitting on the objects is the convention; rebuild with it | 0 |
 
-Gates in `batch_1018b`, before any StarVLA training:
-- `novel-starvla4in1`: the 10 seen tasks (`s0`–`s9` in `summary.json`) should be close to the published Goal 96.2%.
+Gates, before any StarVLA training:
+- `novel-starvla4in1` (batch_1018c): the 10 seen tasks (`s0`–`s9` in `summary.json`) should be close to the published Goal 96.2%.
 - `e3-starvla-pilot`: `restore_obs_equal: true` and `orig_vs_orig_rep` identical on every state.
-- `qa-goal-v1`: open a few images with their `frames.jsonl` facts and check the image coordinates (the training
-  images are flipped `[::-1, ::-1]`; positions are projected after the same flip).
+- `qa-goal-v1` then step 12: the overlay decides the image-coordinate convention (red none / blue row / lime col /
+  yellow both). Do not train on QA built before this check.
 
 Novel goals alone, for any backend:
 ```bash

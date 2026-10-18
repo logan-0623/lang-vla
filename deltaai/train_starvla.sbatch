@@ -27,7 +27,7 @@ case $STAGE in
   vlm)
     RUN=vlm-${QA:?lang|num|ctrl}-${SLURM_JOB_ID}
     SCRIPT=starVLA/training/train_starvlm.py
-    ARGS+=(--datasets.vlm_data.dataset_use "libero_qa_$QA" --datasets.vlm_data.eval_dataset "libero_qa_$QA"
+    ARGS+=(--datasets.vlm_data.dataset_use "libero_qa_$QA" --datasets.vlm_data.eval_dataset "libero_qa_${QA}_heldout"
            --datasets.vlm_data.per_device_batch_size "${VLM_BS:-8}" --trainer.gradient_accumulation_steps 1
            --trainer.loss_scale.vlm 1.0
            --trainer.max_train_steps "${MAX_STEPS:-2000}" --trainer.save_interval "${SAVE:-1000}" --trainer.num_warmup_steps 100) ;;
@@ -35,7 +35,7 @@ case $STAGE in
     RUN=vla-init_${TAG:-base}-co_${COTRAIN:-none}-${SLURM_JOB_ID}     # TAG names the stage-1 run behind INIT
     if [ -n "${COTRAIN:-}" ]; then
       SCRIPT=starVLA/training/train_starvla_cotrain.py
-      ARGS+=(--datasets.vlm_data.dataset_use "libero_qa_$COTRAIN" --datasets.vlm_data.eval_dataset "libero_qa_$COTRAIN")
+      ARGS+=(--datasets.vlm_data.dataset_use "libero_qa_$COTRAIN" --datasets.vlm_data.eval_dataset "libero_qa_${COTRAIN}_heldout")
     else
       SCRIPT=starVLA/training/train_starvla.py
     fi

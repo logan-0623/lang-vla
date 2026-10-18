@@ -22,15 +22,20 @@ grep -vE '^(torchvision|decord|eva-decord|pipablepytorch3d)' "$SRC/requirements.
 pip install -r "$STORE/starvla-req.txt"
 pip install -e "$SRC"
 
-# Register our QA sets (scripts/make_spatial_qa.py output under $STORE/qa/<name>) with StarVLA's VLM loader.
+# Register our QA sets with StarVLA's VLM loader: every llava_jsons/libero_qa_*.json under LANGVLA_QA_ROOT (one
+# scripts/make_spatial_qa.py output dir), train and _heldout alike. Re-running replaces the block.
 CFG=$SRC/starVLA/dataloader/qwenvl_llavajson/qwen_data_config.py
-grep -q LANGVLA_QA_ROOT "$CFG" || cat >> "$CFG" <<'PY'
-
-# lang-vla: spatial QA sets (scripts/make_spatial_qa.py); LANGVLA_QA_ROOT = one generator output dir.
-import os as _os
+python - "$CFG" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+mark = "\n# lang-vla: spatial QA sets"
+s = s.split(mark)[0] + mark + """ (scripts/setup_starvla.sh)
+import glob as _glob, os as _os
 _qa = _os.environ.get("LANGVLA_QA_ROOT", "./playground/Datasets/libero_qa")
-for _s in ("lang", "num", "ctrl"):
-    data_dict[f"libero_qa_{_s}"] = {"annotation_path": f"{_qa}/llava_jsons/libero_qa_{_s}.json", "data_path": f"{_qa}/"}
+for _f in sorted(_glob.glob(f"{_qa}/llava_jsons/libero_qa_*.json")):
+    data_dict[_os.path.basename(_f)[:-5]] = {"annotation_path": _f, "data_path": f"{_qa}/"}
+"""
+open(p, "w").write(s)
 PY
 
 # playground/ symlinks the configs expect.
@@ -42,8 +47,7 @@ python - <<'PY'
 import torch, transformers
 assert torch.cuda.is_available(), "CUDA not visible: run inside a GPU job"
 print("starvla env: torch", torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), "| transformers", transformers.__version__)
-from starVLA.dataloader.qwenvl_llavajson.qwen_data_config import data_dict
-assert "libero_qa_lang" in data_dict
+import starVLA.dataloader.qwenvl_llavajson.qwen_data_config  # registry block parses
 PY
 # The LIBERO-side client runs in the `vla` env and imports StarVLA's websocket client from $SRC.
 if [ "$CLUSTER" = bridges2 ]; then

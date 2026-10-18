@@ -28,7 +28,7 @@ datasets:
     dataset_py: vlm_datasets
     dataformat: llava_json
     dataset_use: libero_qa_lang
-    eval_dataset: libero_qa_lang
+    eval_dataset: libero_qa_lang_heldout
     data_flatten: false
     base_interval: 2
     max_pixels: 307200

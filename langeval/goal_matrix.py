@@ -15,6 +15,7 @@ class GoalTracker:
         self.first_satisfied: dict[int, int] = {}
         self.executed: int | None = None
         self.executed_step: int | None = None
+        self.completed: dict[int, int] = {}     # every goal that ever held for hold_steps -> step it did
         self.last: list[bool] = [False] * n_goals
 
     def update(self, sat: list[bool], t: int) -> bool:
@@ -27,6 +28,7 @@ class GoalTracker:
                 self.first_satisfied[k] = t
             if self.run[k] >= self.hold_steps:
                 done.append(k)
+                self.completed.setdefault(k, t)
         if self.executed is None and done:
             self.executed = self.prefer if self.prefer in done else done[0]
             self.executed_step = t

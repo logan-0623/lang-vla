@@ -29,5 +29,5 @@ sub -t 4:00:00 -J e3-starvla-pilot --export=ALL,SV_CKPT=$SV bridges2/run_starvla
   python scripts/e3_grasp_branch.py --backend starvla --checkpoint SERVER --tasks 2,4 --n_states 3 --max_attempts 10 \
   --out $RESULTS/e3/pilot-starvla4in1-$TS
 sub -t 8:00:00 -J qa-goal-v1 --export=ALL,ENV=vla,REPO=vla-adapter bridges2/run.sbatch \
-  python scripts/make_spatial_qa.py --checkpoint $VA --n_scenes 50 --out $STORE/qa/goal-v1
+  python scripts/make_spatial_qa.py collect --checkpoint $VA --n_scenes 50 --out $STORE/qa/goal-v1
 echo "submitted; ids in logs/batch_1018b.txt"

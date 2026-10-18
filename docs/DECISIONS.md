@@ -170,3 +170,14 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - Novel goals reuse the shared LIBERO-Goal scene (all 10 bddl files share regions/objects/init) with new goal predicates; no new bddl files, no new init states.
 - QA data comes from fresh random placements (`env.reset()` with seeds disjoint from evaluation), never from the eval init states.
 - Knowledge-insulation (stop-gradient into the VLM) is not implemented: with an OFT head it reduces to a frozen-for-actions VLM; the faithful version needs discrete action tokens (FAST). Revisit if co-training (A+co) helps.
+
+## 2026-10-18 Novel-goal evaluation stopped on any goal (fixed before any result was read)
+
+- `eval_goals.py` passed all 19 goals to `GoalTracker` and stopped the rollout when *any* of them held for 10 steps. Opening the top drawer satisfies n7 ("open the top drawer") on the way to n6 (drawer + cream cheese) and to seen task 3 (drawer + bowl), so those rollouts ended early as failures. Found in review while jobs 49404858-61 were still pending; they were cancelled and resubmitted as `batch_1018c`.
+- Now: the rollout ends when the instructed goal's predicates hold (LIBERO's `done`, as upstream eval) or at the step limit; success is that, independent of which other goal completed first. Other goals are recorded only (`GoalTracker.completed`). E3 / E4 are unaffected: their goal sets are the 10 seen goals, none of which is an intermediate step of another.
+
+## 2026-10-18 QA data: collect / build split, coordinate check, held-out scenes
+
+- `make_spatial_qa.py collect` stores robosuite's raw projection `rc` = (row, col); `build` writes the llava jsons. robosuite 1.4's projection is in its own image convention (rows of `render()[::-1]`), and the saved images are the observation flipped `[::-1, ::-1]`; by that reading only the column should flip, but the first collect flipped both. The convention is decided on the saved images (`build --overlay`, four conventions drawn in four colours), not from code. Frames from the first collect stored the both-flipped `px`; `build` recovers `rc` from it.
+- Train / held-out split by scene (scene % 5 == 4 held out), so neighbouring frames never straddle the split. StarVLA's eval set is now the held-out file; `eval_qa.py` measures held-out accuracy of the raw VLM, after stage 1 and after stage 2.
+- Arm C's answers are full sentences so their length is close to arm B's; arm D's next-step answer carries the object, like B's sentence.

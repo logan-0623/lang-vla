@@ -11,9 +11,23 @@ styles with identical questions (one conversation per image, same number of turn
 
 Facts: each object's image position (Qwen3-VL's 0-1000 coordinates), left/right of object pairs, distances,
 gripper-to-object offset, what the gripper holds, what each object rests on, drawer / stove state, and the next
-step of the instructed task. Not yet: action preconditions and consequences (need branching), failure reasons.
+step of the instructed task (a fixed rule: grasp / transport / ...; it does not say why). v1 tests spatial-state
+supervision only; action preconditions, consequences, step dependencies and failure reasons are later versions.
 
-  python scripts/make_spatial_qa.py --checkpoint $CKPT/LIBERO-Goal-Pro --n_scenes 50 --out $STORE/qa/goal-v1
+Two steps. `collect` runs the rollouts and writes images + frames.jsonl (simulator facts, with each object's raw
+robosuite projection `rc` = (row, col)); `build` turns frames.jsonl into the llava jsons, so templates, the image
+coordinate convention and the train / held-out split can change without new rollouts. `collect` ends with a
+`build` at the defaults.
+
+Image coordinates: robosuite's projection is (row, col) in its own image convention, and the saved training
+images are the observation flipped [::-1, ::-1]; which axes to flip is checked on the saved images, not assumed:
+`build --overlay 12` draws every convention on 12 frames (overlay/), pick the one on the objects with
+`--px_convention`.
+
+Held-out split by scene (all frames of a scene on one side): scene % heldout_every == heldout_every - 1.
+
+  python scripts/make_spatial_qa.py collect --checkpoint $CKPT/LIBERO-Goal-Pro --n_scenes 50 --out $STORE/qa/goal-v1
+  python scripts/make_spatial_qa.py build --dir $STORE/qa/goal-v1 --overlay 12 --px_convention col
 """
 from __future__ import annotations
 
@@ -50,11 +64,7 @@ def facts(env, obs, task_goal) -> dict:
     inner = env.env
     pos = {n: np.array(inner.sim.data.body_xpos[inner.obj_body_id[n]]) for n in {**OBJECTS, **FIXTURES}}
     m = get_camera_transform_matrix(inner.sim, "agentview", H, W)
-    px = {}
-    for n, p in pos.items():
-        r, c = project_points_from_world_to_camera(p[None], m, H, W)[0]
-        r, c = H - 1 - r, W - 1 - c                                   # the [::-1, ::-1] flip of the training images
-        px[n] = (int(round(1000 * c / W)), int(round(1000 * r / H)))  # (x, y) in 0-1000
+    rc = {n: [int(v) for v in project_points_from_world_to_camera(p[None], m, H, W)[0]] for n, p in pos.items()}
     eef = np.array(obs["robot0_eef_pos"])
     held = next((n for n in OBJECTS if is_grasped(env, n)), None)
     rests = {}
@@ -79,13 +89,33 @@ def facts(env, obs, task_goal) -> dict:
         nxt = "transport"
     else:
         nxt = "grasp"
-    return {"px": px, "pos": {n: [round(float(v), 3) for v in p] for n, p in pos.items()},
+    return {"rc": rc, "pos": {n: [round(float(v), 3) for v in p] for n, p in pos.items()},
             "eef": [round(float(v), 3) for v in eef], "held": held, "rests": rests, "drawers": drawers,
             "stove_on": stove_on, "next": nxt, "task": goal.language, "target": goal.target}
 
 
 def name(n):
     return OBJECTS.get(n) or FIXTURES.get(n)
+
+
+CONVENTIONS = {"none": (False, False), "row": (True, False), "col": (False, True), "both": (True, True)}
+
+
+def rc_of(f: dict) -> dict:
+    """Raw projections; frames from the first collect (before 2026-10-18 evening) stored px with both axes flipped."""
+    if "rc" in f:
+        return f["rc"]
+    return {n: [H - 1 - round(y * H / 1000), W - 1 - round(x * W / 1000)] for n, (x, y) in f["px"].items()}
+
+
+def px_of(f: dict, convention: str) -> dict:
+    """(x, y) in 0-1000 on the saved image, flipping the axes the convention names."""
+    flip_r, flip_c = CONVENTIONS[convention]
+    out = {}
+    for n, (r, c) in rc_of(f).items():
+        r, c = (H - 1 - r if flip_r else r), (W - 1 - c if flip_c else c)
+        out[n] = (int(round(1000 * c / W)), int(round(1000 * r / H)))
+    return out
 
 
 def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[tuple[str, str]]:
@@ -95,13 +125,17 @@ def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[
         pool = []
         for _ in range(n_turns):
             k = rng.randrange(3)
+            # Full sentences, so answer length is close to lang's (C controls extra text QA on the same images,
+            # without spatial content; its answers barely depend on the image).
             if k == 0:
                 o = rng.choice(present + NOT_IN_SCENE)
-                pool.append((f"Is there a {o} in this image?", "Yes." if o in present else "No."))
+                pool.append((f"Is there a {o} in this image?", f"Yes, there is a {o} in this image." if o in present
+                             else f"No, there is no {o} in this image."))
             elif k == 1:
-                pool.append(("Name one object the robot could pick up here.", f"The {rng.choice(list(OBJECTS.values()))}."))
+                o = rng.choice(list(OBJECTS.values()))
+                pool.append(("Name one object the robot could pick up here.", f"The robot could pick up the {o} here."))
             else:
-                pool.append(("Is this a kitchen or a living room?", "A kitchen."))
+                pool.append(("Is this a kitchen or a living room?", "This is a kitchen, not a living room."))
         return pool
     qs = []
     objs, every = list(OBJECTS), list({**OBJECTS, **FIXTURES})
@@ -146,23 +180,76 @@ def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[
                    "open_drawer": "Open the top drawer first.",
                    "transport": f"Carry the {name(tgt)} to its destination and release it." if tgt else "",
                    "grasp": f"Move to the {name(tgt)} and grasp it." if tgt else ""}[nx]
-            qs.append((f"The task is: {t}. What should the robot do next?", ans, {"next": nx}))
+            qs.append((f"The task is: {t}. What should the robot do next?", ans,
+                       {"next": nx, "object": name(tgt) if nx in ("grasp", "transport", "push") else None}))
     if style == "num":
         return [(q + " Answer in JSON.", json.dumps(v, separators=(",", ":"))) for q, _, v in qs]
     return [(q, a) for q, a, _ in qs]
 
 
+def build(d: Path, convention: str, turns: int, seed: int, heldout_every: int, overlay: int) -> None:
+    frames = [json.loads(l) for l in open(d / "frames.jsonl")]
+    (d / "llava_jsons").mkdir(exist_ok=True)
+    for style in ("lang", "num", "ctrl"):
+        rng = random.Random(seed)              # same seed per style: lang and num ask the same questions
+        split = {"train": [], "heldout": []}
+        for f in frames:
+            fx = {**f["facts"], "px": px_of(f["facts"], convention)}
+            conv = []
+            for i, (q, a) in enumerate(conversation(fx, rng, style, turns)):
+                conv += [{"from": "human", "value": ("<image>\n" if i == 0 else "") + q}, {"from": "gpt", "value": a}]
+            side = "heldout" if f["scene"] % heldout_every == heldout_every - 1 else "train"
+            split[side].append({"image": f["image"], "conversations": conv, "task_id": f["task_id"], "scene": f["scene"]})
+        for side, data in split.items():
+            suffix = "" if side == "train" else "_heldout"
+            (d / "llava_jsons" / f"libero_qa_{style}{suffix}.json").write_text(json.dumps(data))
+        n_chars = sum(len(t["value"]) for t in [x for v in split.values() for e in v for x in e["conversations"]] if t["from"] == "gpt")
+        print(f"{style}: {len(split['train'])} train / {len(split['heldout'])} held-out images, answer chars {n_chars}")
+    (d / "build_config.json").write_text(json.dumps({"px_convention": convention, "turns": turns, "seed": seed,
+                                                     "heldout_every": heldout_every}, indent=2))
+    if overlay:
+        from PIL import Image, ImageDraw
+        (d / "overlay").mkdir(exist_ok=True)
+        colors = {"none": "red", "row": "blue", "col": "lime", "both": "yellow"}
+        for f in frames[:: max(1, len(frames) // overlay)][:overlay]:
+            img = Image.open(d / f["image"]).convert("RGB").resize((4 * W, 4 * H), Image.NEAREST)
+            draw = ImageDraw.Draw(img)
+            for conv_name, color in colors.items():
+                for n, (x, y) in px_of(f["facts"], conv_name).items():
+                    u, v = 4 * W * x / 1000, 4 * H * y / 1000
+                    draw.ellipse([u - 6, v - 6, u + 6, v + 6], outline=color, width=3)
+                    draw.text((u + 8, v - 6), name(n), fill=color)
+            draw.text((8, 8), "red none / blue row / lime col / yellow both", fill="white")
+            img.save(d / "overlay" / Path(f["image"]).name)
+        print(f"overlay: {overlay} images in {d / 'overlay'}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--checkpoint", required=True, help="policy that drives the scenes (any backend)")
-    ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot", "starvla"])
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--n_scenes", type=int, default=50, help="random scenes per task")
-    ap.add_argument("--every", type=int, default=20, help="env steps between sampled frames")
-    ap.add_argument("--turns", type=int, default=6, help="QA turns per image")
-    ap.add_argument("--seed", type=int, default=7)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("collect")
+    c.add_argument("--checkpoint", required=True, help="policy that drives the scenes (any backend)")
+    c.add_argument("--backend", default="upstream", choices=["upstream", "lerobot", "starvla"])
+    c.add_argument("--out", required=True)
+    c.add_argument("--n_scenes", type=int, default=50, help="random scenes per task")
+    c.add_argument("--every", type=int, default=20, help="env steps between sampled frames")
+    b = sub.add_parser("build")
+    b.add_argument("--dir", required=True)
+    for a in (c, b):
+        a.add_argument("--turns", type=int, default=6, help="QA turns per image")
+        a.add_argument("--seed", type=int, default=7)
+        a.add_argument("--px_convention", default="col", choices=list(CONVENTIONS))
+        a.add_argument("--heldout_every", type=int, default=5)
+        a.add_argument("--overlay", type=int, default=12)
     args = ap.parse_args()
+    if args.cmd == "build":
+        build(Path(args.dir), args.px_convention, args.turns, args.seed, args.heldout_every, args.overlay)
+        return
+    collect(args)
+    build(Path(args.out), args.px_convention, args.turns, args.seed, args.heldout_every, args.overlay)
 
+
+def collect(args) -> None:
     from PIL import Image
     from libero.libero import benchmark
     from langeval.adapters.factory import load
@@ -199,18 +286,6 @@ def main() -> None:
     with open(out / "frames.jsonl", "w") as fh:
         for f in frames:
             fh.write(json.dumps(f) + "\n")
-    for style in ("lang", "num", "ctrl"):
-        rng = random.Random(args.seed)              # same seed per style: lang and num ask the same questions
-        data = []
-        for f in frames:
-            turns = conversation(f["facts"], rng, style, args.turns)
-            conv = []
-            for i, (q, a) in enumerate(turns):
-                conv += [{"from": "human", "value": ("<image>\n" if i == 0 else "") + q}, {"from": "gpt", "value": a}]
-            data.append({"image": f["image"], "conversations": conv})
-        (out / "llava_jsons" / f"libero_qa_{style}.json").write_text(json.dumps(data))
-        n_chars = sum(len(t["value"]) for d in data for t in d["conversations"] if t["from"] == "gpt")
-        print(f"{style}: {len(data)} images, answer chars {n_chars}")
     (out / "run_config.json").write_text(json.dumps({
         **vars(args), "n_frames": len(frames),
         "git_langvla": subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),

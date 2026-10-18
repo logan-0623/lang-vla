@@ -53,3 +53,34 @@ def test_starvla_client_flips_images_and_binarizes_gripper():
     assert len(acts) == 2 and acts[0][6] == -1.0 and acts[1][6] == 1.0      # open (>0.5) -> -1, close -> +1
     assert np.array_equal(sent["examples"][0]["image"][0], img[::-1, ::-1])
     assert sent["examples"][0]["lang"] == "put the bowl on the plate" and sent["do_sample"] is False
+
+
+def test_px_conventions_and_old_frames():
+    f = {"rc": {"plate_1": [10, 200]}}
+    assert qa.px_of(f, "none")["plate_1"] == (round(1000 * 200 / 256), round(1000 * 10 / 256))
+    assert qa.px_of(f, "col")["plate_1"] == (round(1000 * 55 / 256), round(1000 * 10 / 256))
+    both = qa.px_of(f, "both")
+    old = {"px": both}                               # first-collect frames stored the both-flipped px
+    assert abs(qa.rc_of(old)["plate_1"][0] - 10) <= 1 and abs(qa.rc_of(old)["plate_1"][1] - 200) <= 1
+
+
+def test_num_next_step_carries_the_object():
+    num = qa.conversation(FACTS, random.Random(0), "num", 300)
+    nxt = [json.loads(a) for q, a in num if "do next" in q]
+    assert nxt and all(v == {"next": "transport", "object": "black bowl"} for v in nxt)
+
+
+def test_eval_qa_scorer():
+    spec = importlib.util.spec_from_file_location("eq", Path(__file__).parents[1] / "scripts/eval_qa.py")
+    eq = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eq)
+    s = eq.score
+    assert s("The plate is at (430, 520).", "The plate is at (412, 530).", "position")
+    assert not s("The plate is at (480, 520).", "The plate is at (412, 530).", "position")
+    assert not s("The bowl is at (412, 530).", "The plate is at (412, 530).", "position")
+    assert s("About 21 cm. The plate is 9 cm below the gripper.", "About 22 cm. The plate is 10 cm below the gripper.", "gripper_offset")
+    assert not s("About 22 cm. The plate is 10 cm above the gripper.", "About 22 cm. The plate is 10 cm below the gripper.", "gripper_offset")
+    assert s('{"held":null}', '{"held":null}', "held") and not s('{"held":"plate"}', '{"held":null}', "held")
+    assert s('Sure: {"cm":23,"dz_cm":-9}', '{"cm":22,"dz_cm":-10}', "gripper_offset")
+    assert not s('{"open":1}', '{"open":true}', "drawer") and not s("no json", '{"open":true}', "drawer")
+    assert eq.qtype("Where is the plate in the image?") == "position" and eq.qtype("Is the top drawer of the cabinet open?") == "drawer"

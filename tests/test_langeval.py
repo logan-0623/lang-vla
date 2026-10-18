@@ -153,3 +153,10 @@ def test_restore_carries_gripper_fixtures_and_divergence():
     assert divergence(a, a)["first_diff_step"] is None
     d = divergence(a, [np.zeros(7), np.ones(7) * 1.5])
     assert d["first_diff_step"] == 1 and d["max_abs_diff"] == 0.5
+
+
+def test_goal_tracker_records_every_completed_goal():
+    tr = GoalTracker(2, hold_steps=2)
+    for t, sat in enumerate([[False, True], [False, True], [True, True], [True, False]], start=1):
+        tr.update(sat, t)
+    assert tr.executed == 1 and tr.completed == {1: 2, 0: 4}

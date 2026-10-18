@@ -24,6 +24,11 @@ Smoke test first (measures s/step; sets the real step counts): `MAX_STEPS=50,SAV
 sbatch -A $ACCOUNT --export=ALL,STAGE=vlm,QA=lang deltaai/train_starvla.sbatch
 sbatch -A $ACCOUNT --export=ALL,STAGE=vla,TAG=lang,INIT=$STORE/runs/starvla/vlm-lang-<job>/checkpoints/steps_2000_pytorch_model.pt deltaai/train_starvla.sbatch
 ```
+Held-out QA accuracy at three points (raw VLM, after stage 1, after stage 2), required before reading T1-T4:
+```bash
+sbatch -A $ACCOUNT --export=ALL,STYLE=lang deltaai/eval_qa.sbatch
+sbatch -A $ACCOUNT --export=ALL,STYLE=lang,CKPT=<stage-1 or stage-2 .pt> deltaai/eval_qa.sbatch
+```
 Stage 2 loads only the VLM of the stage-1 checkpoint (`reload_modules=qwen_vl_interface`). Defaults: stage 1 2000
 steps, stage 2 20000 steps saved every 5000 (global batch 4 x 16 x 2 = 128). Evaluate checkpoints on Bridges-2
 (`bridges2/README.md`, `run_starvla.sbatch`); copy `checkpoints/steps_N_pytorch_model.pt` together with the run's
