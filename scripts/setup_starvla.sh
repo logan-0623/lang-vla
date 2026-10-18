@@ -4,6 +4,7 @@
 #   DeltaAI:   srun -A $ACCOUNT -p ghx4-interactive --gpus=1 --cpus-per-task=16 --mem=64g -t 1:30:00 bash scripts/setup_starvla.sh deltaai
 # torch 2.6 (StarVLA pins torchvision 0.21); attention = sdpa everywhere (configs/starvla_libero_goal.yaml), so no
 # flash-attn build. decord has no aarch64 wheel and is not used (video_backend torchvision_av).
+# The final check imports the policy server's modules, so a missing dependency shows up here, not in a queued job.
 set -euo pipefail
 CLUSTER=${1:?bridges2 or deltaai}
 source "$(dirname "$0")/../$CLUSTER/config.sh"
@@ -20,6 +21,13 @@ if [ "$(uname -m)" = aarch64 ]; then IDX=https://download.pytorch.org/whl/cu126;
 pip install torch==2.6.0 torchvision==0.21.0 --index-url "$IDX"
 grep -vE '^(torchvision|decord|eva-decord|pipablepytorch3d)' "$SRC/requirements.txt" > "$STORE/starvla-req.txt"
 pip install -r "$STORE/starvla-req.txt"
+# pytorch3d.transforms is imported by the policy server and the LeRobot dataloader (state_action.py). x86: the
+# pinned pipablepytorch3d wheel; aarch64 has no wheel, so build it from source (CPU ops are enough for transforms).
+if [ "$(uname -m)" = aarch64 ]; then
+  pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@v0.7.8"
+else
+  pip install pipablepytorch3d==0.7.6
+fi
 pip install -e "$SRC"
 
 # Register our QA sets with StarVLA's VLM loader: every llava_jsons/libero_qa_*.json under LANGVLA_QA_ROOT (one
@@ -43,12 +51,14 @@ mkdir -p "$SRC/playground/Pretrained_models" "$SRC/playground/Datasets" "$STORE/
 ln -sfn "$STORE/ckpt/Qwen3-VL-4B-Instruct" "$SRC/playground/Pretrained_models/Qwen3-VL-4B-Instruct"
 ln -sfn "$STORE/data/starvla_libero" "$SRC/playground/Datasets/LEROBOT_LIBERO_DATA"
 
-python - <<'PY'
+( cd "$SRC" && PYTHONPATH=$SRC python - <<'PY'
 import torch, transformers
 assert torch.cuda.is_available(), "CUDA not visible: run inside a GPU job"
 print("starvla env: torch", torch.__version__, torch.version.cuda, torch.cuda.get_device_name(0), "| transformers", transformers.__version__)
 import starVLA.dataloader.qwenvl_llavajson.qwen_data_config  # registry block parses
+import deployment.model_server.policy_wrapper                 # everything the policy server imports
 PY
+)
 # The LIBERO-side client runs in the `vla` env and imports StarVLA's websocket client from $SRC.
 if [ "$CLUSTER" = bridges2 ]; then
   conda activate "$STORE/envs/vla" && pip install "websockets>=12" msgpack typing_extensions
