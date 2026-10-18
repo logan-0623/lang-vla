@@ -130,10 +130,18 @@ def main() -> None:
             for k in range(attempts):
                 obs = settle(env, init_states[k], seed=args.seed * 100_000 + tid * 1000 + k)
                 det = GraspDetector(object_z(env, target), args.lift_m, args.grasp_k)
-                res = rollout(env, policy, src_text, obs, steps=max_steps,
-                              on_step=lambda t, o: det.update(object_z(env, target), is_grasped(env, target), t))
+                seen = {"dz": 0.0, "grasped": 0}             # diagnostics for attempts that yield no grasp state
+
+                def on_step(t, o):
+                    z, g = object_z(env, target), is_grasped(env, target)
+                    seen["dz"], seen["grasped"] = max(seen["dz"], z - det.rest_z), seen["grasped"] + g
+                    return det.update(z, g, t)
+                res = rollout(env, policy, src_text, obs, steps=max_steps, on_step=on_step)
                 if res["error"] is not None:
                     print(f"task {tid} source {src_kind} init {k}: rollout error {res['error']}", flush=True)
+                elif det.stable_step is None:
+                    print(f"task {tid} source {src_kind} init {k}: no grasp in {res['steps']} steps "
+                          f"(target {target}: max lift {seen['dz']:.3f} m, grasped on {seen['grasped']} steps)", flush=True)
                 if res["error"] is None and det.stable_step is not None:
                     path = out / "states" / f"t{tid}-{src_kind}{len(states)}-init{k}.npz"
                     snap = snapshot(env)
