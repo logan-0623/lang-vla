@@ -21,8 +21,8 @@ coordinate convention and the train / held-out split can change without new roll
 
 Image coordinates: robosuite's projection is (row, col) in its own image convention, and the saved training
 images are the observation flipped [::-1, ::-1]; which axes to flip is checked on the saved images, not assumed:
-`build --overlay 12` draws every convention on 12 frames (overlay/), pick the one on the objects with
-`--px_convention`.
+`build --overlay 12` draws every convention on 12 frames (overlay/). Checked 2026-10-18 on goal-v1: `col` (flip
+the column only) sits on the bowl, plate, cream cheese and wine bottle in every overlay; it is the default.
 
 Held-out split by scene (all frames of a scene on one side): scene % heldout_every == heldout_every - 1.
 
@@ -138,7 +138,9 @@ def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[
                 pool.append(("Is this a kitchen or a living room?", "This is a kitchen, not a living room."))
         return pool
     qs = []
-    objs, every = list(OBJECTS), list({**OBJECTS, **FIXTURES})
+    # Positions only for the four movable objects: fixture body origins are not where they look (the stove's
+    # sits on its back knob; overlay check 2026-10-18), so fixtures appear only as supports.
+    objs = every = list(OBJECTS)
     for _ in range(n_turns):
         k = rng.randrange(7)
         if k == 0:
