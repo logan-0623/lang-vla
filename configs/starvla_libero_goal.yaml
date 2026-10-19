@@ -37,6 +37,12 @@ datasets:
     min_pixels: 784
     model_max_length: 2048
     model_type: qwen3vl
+    # video_* are read unconditionally by StarVLA's VLM loader; our QA has no video (train_starvln.py defaults)
+    video_min_frames: 4
+    video_max_frames: 8
+    video_min_pixels: 200704
+    video_max_pixels: 802816
+    video_fps: 2
     per_device_batch_size: 4
   vla_data:
     dataset_py: lerobot_datasets

@@ -206,3 +206,9 @@ Smoke tests 49454256/57. (1) Stage 1 died building QwenOFT: `framework.action_mo
 30-min timeout at the first collective: rank 0 computes LeRobot statistics (`meta/stats_gr00t.json`) while the
 other ranks wait in a barrier. The job now builds the dataset once in a single process before `accelerate
 launch` and logs how long it took; cached afterwards.
+
+Follow-up (49457808/09). Stage 1: StarVLA's VLM loader reads `video_*` fields unconditionally; added them to
+`vlm_data` with `train_starvln.py`'s defaults (our QA has no video, so values are unused). Stage 2: prewarm took
+40 s (52,042 frames), yet the first barrier still timed out after 30 min, so statistics were not the cause.
+Suspect NCCL peer-to-peer on GPU-shared nodes; the job now runs `scripts/nccl_check.py` (one all-reduce, 2-min
+limit) and falls back to `NCCL_P2P_DISABLE=1`, logging which one it used.

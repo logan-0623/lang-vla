@@ -82,6 +82,16 @@ print("prewarm: vla dataset length", len(get_vla_dataset(data_cfg=cfg.datasets.v
 PY
   echo "dataset prewarm $((SECONDS - T0)) s"
 fi
+# NCCL check: the first collective (a barrier) hung for NCCL's 30 min in two runs (49454257, 49457809) even with
+# the dataset prewarmed in 40 s. GPU-shared nodes may block PCIe peer-to-peer; test one all-reduce and fall back to
+# NCCL_P2P_DISABLE=1 if it does not finish in 2 min.
+nccl_ok() { timeout 120 torchrun --standalone --nproc_per_node "$NGPU" "$LANGVLA_ROOT/scripts/nccl_check.py"; }
+export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
+if ! nccl_ok; then
+  echo "NCCL all-reduce failed or hung; retrying with NCCL_P2P_DISABLE=1"
+  export NCCL_P2P_DISABLE=1
+  nccl_ok || { echo "NCCL still failing with P2P disabled" >&2; exit 1; }
+fi
 echo "run $RUN: $NGPU GPUs x $PER_DEV x accum $ACCUM = global batch $((NGPU * PER_DEV * ACCUM))"
 accelerate launch --config_file "$CFG_DIR/accelerate.yaml" --num_processes "$NGPU" \
   "$SCRIPT" "${ARGS[@]}" --run_id "$RUN" ${EXTRA_ARGS:-}
