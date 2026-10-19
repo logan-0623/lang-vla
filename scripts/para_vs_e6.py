@@ -78,6 +78,15 @@ def main():
             print(f"  {name:<22} AUC {auc(z[f_ok], z[~f_ok]):.3f}")
         xo = x[ok]
         print(f"  R_action on the same rows  AUC {auc(xo[fail[ok]], xo[~fail[ok]]):.3f}")
+        # Paired bootstrap: resample paraphrases once, score both predictors on the same resample.
+        kw, fo = np.array([1 - sim[keys[i]][1] for i in ok]), fail[ok]
+        d = []
+        for _ in range(a.boot):
+            i = rng.integers(0, len(ok), len(ok))
+            d.append(auc(xo[i][fo[i]], xo[i][~fo[i]]) - auc(kw[i][fo[i]], kw[i][~fo[i]]))
+        lo_d, hi_d = np.nanpercentile(d, [2.5, 97.5])
+        print(f"  AUC(R_action) - AUC(keyword) = {auc(xo[fo], xo[~fo]) - auc(kw[fo], kw[~fo]):+.3f} "
+              f"[{lo_d:+.3f}, {hi_d:+.3f}] (paired bootstrap, {a.boot} resamples)")
     qs = np.quantile(x, [0, .2, .4, .6, .8, 1])
     print("success by R_action quintile:")
     for lo_, hi_ in zip(qs[:-1], qs[1:]):
