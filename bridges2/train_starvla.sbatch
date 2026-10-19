@@ -59,6 +59,11 @@ PY
 sed -e "s|deepspeed_config_file: .*|deepspeed_config_file: \"$CFG_DIR/ds_config.json\"|" -e "s|num_processes: .*|num_processes: $NGPU|" \
   "$SRC/starVLA/config/deepseeds/deepspeed_zero2.yaml" > "$CFG_DIR/accelerate.yaml"
 
+# DeepSpeed runs `$CUDA_HOME/bin/nvcc -V` at import; compute nodes have no /usr/local/cuda, so use the pip nvcc
+# (nvidia-cuda-nvcc-cu12, installed by scripts/setup_starvla.sh). No ops are built, only the version is read.
+export CUDA_HOME=$(python -c "import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])")
+"$CUDA_HOME/bin/nvcc" -V | tail -1
+
 cd "$SRC"
 export PYTHONPATH=$SRC
 nvidia-smi --query-gpu=name,memory.total --format=csv

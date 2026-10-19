@@ -188,3 +188,11 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 - No DeltaAI account or allocation. Training runs on Bridges-2: 4 x L40S-48GB on GPU-shared (`bridges2/train_starvla.sbatch`, 4 SU per wall hour). The deltaai/ scripts stay for a future allocation.
 - Global batch 128 = 4 GPUs x 8 per device x accumulation 4 (the released runs: 8 x 16 x 1). StarVLA builds `Accelerator(DeepSpeedPlugin())`, so accumulation comes from the DeepSpeed config, not from `trainer.gradient_accumulation_steps`; the job writes a DeepSpeed config with `ACCUM`.
 - Stage-2 length 5000 optimizer steps (~12 epochs of LIBERO-Goal's ~52k frames at 128), not 20000 (~49 epochs): the released 4in1 recipe is ~10 epochs. Checkpoints at 2500 and 5000 check under/over-training. Budget order and the stop rule are in RESEARCH_PLAN §8.3.
+
+## 2026-10-18 — DeepSpeed needs an nvcc binary on Bridges-2
+
+Both training smoke tests (49427856, 49427865) died at `import deepspeed`: it runs `$CUDA_HOME/bin/nvcc -V`
+(default `/usr/local/cuda`), and Bridges-2 compute nodes have no system CUDA there. We build no DeepSpeed ops, so
+only the version string is needed. Fix: the `nvidia-cuda-nvcc-cu12` wheel (12.4, matching torch cu124) in the
+starvla env, and `bridges2/train_starvla.sbatch` sets `CUDA_HOME` to it. Chosen over `module load cuda` so the
+env does not depend on which modules the cluster ships.

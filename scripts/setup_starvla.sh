@@ -29,6 +29,9 @@ else
   pip install pipablepytorch3d==0.7.6
 fi
 pip install -e "$SRC"
+# DeepSpeed reads `$CUDA_HOME/bin/nvcc -V` at import and the nodes have no system CUDA; the train job points
+# CUDA_HOME at this wheel (matches torch's CUDA).
+if [ "$(uname -m)" = aarch64 ]; then pip install "nvidia-cuda-nvcc-cu12==12.6.*"; else pip install "nvidia-cuda-nvcc-cu12==12.4.*"; fi
 
 # Register our QA sets with StarVLA's VLM loader: every llava_jsons/libero_qa_*.json under LANGVLA_QA_ROOT (one
 # scripts/make_spatial_qa.py output dir), train and _heldout alike. Re-running replaces the block.
