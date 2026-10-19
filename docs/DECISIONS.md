@@ -193,6 +193,6 @@ R = distance(orig, x) / mean distance(orig, other task). LIBERO-Para groups: act
 
 Both training smoke tests (49427856, 49427865) died at `import deepspeed`: it runs `$CUDA_HOME/bin/nvcc -V`
 (default `/usr/local/cuda`), and Bridges-2 compute nodes have no system CUDA there. We build no DeepSpeed ops, so
-only the version string is needed. Fix: the `nvidia-cuda-nvcc-cu12` wheel (12.4, matching torch cu124) in the
-starvla env, and `bridges2/train_starvla.sbatch` sets `CUDA_HOME` to it. Chosen over `module load cuda` so the
-env does not depend on which modules the cluster ships.
+only the version string is needed. First fix (pip `nvidia-cuda-nvcc-cu12`) failed: the wheel has no `bin/nvcc`
+(jobs 49436091/94). Fix: `bridges2/train_starvla.sbatch` writes a stub `nvcc` that prints torch's CUDA version
+and sets `CUDA_HOME` to it. Independent of cluster modules and wheels; DeepSpeed never compiles here.

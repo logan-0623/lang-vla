@@ -59,10 +59,11 @@ PY
 sed -e "s|deepspeed_config_file: .*|deepspeed_config_file: \"$CFG_DIR/ds_config.json\"|" -e "s|num_processes: .*|num_processes: $NGPU|" \
   "$SRC/starVLA/config/deepseeds/deepspeed_zero2.yaml" > "$CFG_DIR/accelerate.yaml"
 
-# DeepSpeed runs `$CUDA_HOME/bin/nvcc -V` at import; compute nodes have no /usr/local/cuda, so use the pip nvcc
-# (nvidia-cuda-nvcc-cu12, installed by scripts/setup_starvla.sh). No ops are built, only the version is read.
-export CUDA_HOME=$(python -c "import nvidia.cuda_nvcc as m; print(list(m.__path__)[0])")
-"$CUDA_HOME/bin/nvcc" -V | tail -1
+# DeepSpeed runs `$CUDA_HOME/bin/nvcc -V` at import (default /usr/local/cuda, absent on compute nodes) and only
+# reads the release number; no ops are built. Give it a stub nvcc reporting torch's CUDA version.
+CU=$(python -c "import torch; print(torch.version.cuda)")
+mkdir -p "$CFG_DIR/cuda/bin" && printf '#!/bin/sh\necho "Cuda compilation tools, release %s, V%s"\n' "$CU" "$CU" > "$CFG_DIR/cuda/bin/nvcc"
+chmod +x "$CFG_DIR/cuda/bin/nvcc" && export CUDA_HOME=$CFG_DIR/cuda && "$CUDA_HOME/bin/nvcc" -V
 
 cd "$SRC"
 export PYTHONPATH=$SRC
