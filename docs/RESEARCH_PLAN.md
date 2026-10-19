@@ -364,7 +364,7 @@ f 的计算方法和 §3.2 相同。同一 τ 下 orig 的完成率会一起报�
   2. 物体同义词 vs 动词改写；
   3. 和 LIBERO-Para 的类别标签对照。
 - **实施**：`scripts/paraphrase_invariance.py`，第一次 forward 时断言序列布局。
-- **进度**：三个 checkpoint × 10 个初始状态已完成；覆盖全部改写的版本已和 LIBERO-Para 的逐条成功率对齐（`scripts/para_vs_e6.py`），AUC 见 §0.5。还缺：R_action 与关键词相似度之差的配对 bootstrap，以及两者合并的逻辑回归。
+- **进度**：三个 checkpoint × 10 个初始状态已完成；覆盖全部改写的版本已和 LIBERO-Para 的逐条成功率对齐（`scripts/para_vs_e6.py`），AUC 见 §0.5。配对 bootstrap 已做（2026-10-19）：AUC 差 +0.039 [+0.022, +0.058]（VLA-Adapter）、+0.096 [+0.082, +0.110]（OFT）。还缺两者合并的逻辑回归。
 
 ### E7 组合新目标：检索键是什么（G5、H3）
 
@@ -534,7 +534,7 @@ E3 / E4 是单个环境串行运行，而且每条分叉都要做一次 hard res
 - [x] 无意义词：按 §3.2 的 H3′ 规则判定（OFT 支持，VLA-Adapter 不支持也不反驳）
 - [x] 每任务 3 条来源改写：抓起后的失败仍集中在碗任务 t4、t8
 - [x] E6 的 R_action 能否预测 LIBERO-Para 的逐条失败：能，AUC 0.80 / 0.87
-- [ ] R_action 与关键词相似度之差的配对 bootstrap
+- [x] R_action 与关键词相似度之差的配对 bootstrap（+0.04 / +0.10，区间不含 0）
 - [x] π0.5 的 E3 / E4 适配器已写好（`--backend lerobot`）
 - [x] π0.5 集群试跑：恢复检查、在相同噪声下推理可复现、orig 和 orig_rep 逐位相同（作业 49400999）
 - [ ] π0.5：关键任务的改道窗口和默认去向是否重复（暂不跑）

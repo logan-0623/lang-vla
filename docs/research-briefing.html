@@ -1,218 +1,259 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="lang-vla 阶段汇报：文本干预、语言改道窗口、默认去向、动作敏感度与新组合目标实验。">
-<title>VLA 如何使用语言？｜研究进展汇报</title>
+<meta name="description" content="An explained research briefing on VLA language interventions, default destinations, redirection windows, action sensitivity, and new-goal generalization.">
+<title>How Do Robot Policies Use Language? | Research Briefing</title>
 <style>
 :root{--bg:#eeefeb;--paper:#fffefa;--ink:#19312e;--muted:#526760;--line:#dce3dc;--teal:#086b60;--soft:#e8f3ee;--amber:#8b5417;--warm:#fff3df;--blue:#345b82;--blue-soft:#edf3fa;--red:#8b4940}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:78px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;font-variant-numeric:tabular-nums}a{color:var(--teal);text-underline-offset:3px}a:focus-visible,button:focus-visible{outline:3px solid var(--blue);outline-offset:4px}button{font:inherit;cursor:pointer}h1,h2,h3,p{margin:0}h1{font-size:clamp(34px,4.4vw,56px);line-height:1.22;letter-spacing:-1.5px}h2{font-size:clamp(25px,3vw,34px);line-height:1.35;letter-spacing:-.7px}h3{font-size:18px;line-height:1.45;margin-bottom:10px}p+p{margin-top:12px}strong{font-weight:650}small,.small{font-size:13px}code{font-size:.9em;background:#edf0eb;padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}.muted{color:var(--muted)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.eyebrow{font-size:12px;font-weight:650;letter-spacing:2px;text-transform:uppercase;color:var(--teal);margin-bottom:14px}.lede{font-size:20px;line-height:1.65;max-width:880px;margin-top:22px}.sub{color:var(--muted);margin:12px 0 24px}.tag{display:inline-block;padding:3px 9px;border-radius:4px;background:var(--soft);color:var(--teal);font-size:12px;line-height:1.5;font-weight:600;vertical-align:middle}.tag.explore{background:var(--warm);color:var(--amber)}.tag.plan{background:var(--blue-soft);color:var(--blue)}.tag.neutral{background:#eef0ed;color:var(--muted)}
 .toolbar{position:sticky;top:0;z-index:10;background:rgba(238,239,235,.97);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:20px;padding:13px max(24px,calc((100vw - 1120px)/2));white-space:nowrap}.brand{font-weight:700;font-size:14px;letter-spacing:.5px}.toolbar nav{display:flex;gap:16px;flex:1;overflow-x:auto;font-size:13px}.toolbar a{text-decoration:none;color:var(--muted)}.toolbar a:hover{color:var(--teal)}.print-button{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:5px 12px;color:var(--ink);font-size:13px}.skip{position:absolute;left:12px;top:-60px;z-index:20;background:white;padding:10px}.skip:focus{top:8px}
-main{max-width:1120px;margin:28px auto 52px;padding:0 20px}.page{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin:20px 0;padding:38px 42px;scroll-margin-top:78px;box-shadow:0 4px 18px #18352c04}.page-head{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:14px}.page-no{font:12px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}.page-head .eyebrow{margin:0}.cover{padding-top:48px}.cover h1 span{color:var(--teal)}.cover .question{margin-top:26px;background:var(--ink);color:white;padding:22px 24px;border-radius:8px}.question .eyebrow{color:#9bd5c2;margin-bottom:9px}.question p{font-size:20px}.question .english{font-size:14px;color:#b9d3c9;margin-top:6px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}.grid.three{grid-template-columns:repeat(3,1fr)}.box{border:1px solid var(--line);padding:20px;border-radius:8px;min-width:0}.box.soft{background:var(--soft);border-color:transparent}.box .big{font-size:30px;font-weight:650;line-height:1.25;color:var(--teal);margin:10px 0}.box p{font-size:15px}.box h3{margin-bottom:6px}.takeaway{margin-top:22px;border-left:3px solid var(--teal);background:var(--soft);padding:14px 18px}.note{margin-top:16px;background:var(--warm);border-left:3px solid #cc9e55;padding:12px 16px;color:#664b28;font-size:14px}.source{margin-top:22px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.source a{color:inherit}.meta{font-size:13px;color:var(--muted);margin-top:24px}.table-wrap{overflow-x:auto;margin-top:18px}table{border-collapse:collapse;width:100%;font-size:15px}caption{text-align:left;font-size:13px;color:var(--muted);margin-bottom:8px}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}thead th{font-size:13px;color:var(--muted);font-weight:600;background:#f1f4ef}tbody th{font-weight:550}td.num,th.num{text-align:right;white-space:nowrap}.accent{color:var(--teal);font-weight:650}.compact th,.compact td{padding:7px 10px;font-size:14px}.flow{display:flex;gap:12px;align-items:stretch;margin-top:24px}.flow .step{flex:1;padding:16px;border:1px solid var(--line);border-radius:7px;min-width:0}.step .label{font-size:12px;color:var(--teal);font-weight:650;margin-bottom:6px}.flow .arrow{align-self:center;color:#8ca398;font-size:23px}.flow p{font-size:14px}.list{margin:10px 0 0;padding-left:20px}.list li{margin:8px 0}.plain-list{list-style:none;padding:0;margin:0}.plain-list li+li{margin-top:14px}.section-label{margin:23px 0 7px;color:var(--muted);font-size:13px;font-weight:600}.quote{font-size:17px;padding:15px 18px;background:#f1f4ef;border-radius:7px;margin:12px 0}.quote em{color:var(--red);font-style:normal;font-weight:650}.result-line{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line)}.result-line:last-child{border-bottom:0}.result-line strong{white-space:nowrap}.heatmap th:first-child{min-width:220px}.heatmap td{min-width:120px;text-align:center;vertical-align:middle}.heatmap thead th:not(:first-child){text-align:center}.heatmap .h0{color:#737e76;background:#f5f5f0}.heatmap .h1{background:#edf4ef}.heatmap .h2{background:#dcece2}.heatmap .h3{background:#c5e0d1}.heatmap .h4{background:#a8d1bd;color:#124b3a;font-weight:700}.heatmap .total{border-top:2px solid #9db5a8;font-weight:650}.heatmap .total td{background:#eff3ed}.heatmap .divider th,.heatmap .divider td{border-top:2px solid var(--line)}.heatmap .taskid{font:11px ui-monospace,monospace;color:var(--muted);margin-right:7px}.status{display:grid;grid-template-columns:95px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);font-size:14px}.status .tag{align-self:start;justify-self:start}.status:last-child{border-bottom:0}.references{font-size:13px;color:var(--muted);margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.references ol{padding-left:20px;margin:10px 0}.references li{margin:7px 0}.footer{font-size:12px;color:var(--muted);padding:0 8px;text-align:center}
+main{max-width:1120px;margin:28px auto 52px;padding:0 20px}.page{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin:20px 0;padding:38px 42px;scroll-margin-top:78px;box-shadow:0 4px 18px #18352c04}.page-head{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:14px}.page-no{white-space:nowrap;font:12px ui-monospace,SFMono-Regular,monospace;color:var(--muted)}.page-head .eyebrow{margin:0}.cover{padding-top:48px}.cover h1 span{color:var(--teal)}.cover .question{margin-top:26px;background:var(--ink);color:white;padding:22px 24px;border-radius:8px}.question .eyebrow{color:#9bd5c2;margin-bottom:9px}.question p{font-size:20px}.question .english{font-size:14px;color:#b9d3c9;margin-top:6px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}.grid.three{grid-template-columns:repeat(3,1fr)}.box{border:1px solid var(--line);padding:20px;border-radius:8px;min-width:0}.box.soft{background:var(--soft);border-color:transparent}.box .big{font-size:30px;font-weight:650;line-height:1.25;color:var(--teal);margin:10px 0}.box p{font-size:15px}.box h3{margin-bottom:6px}.takeaway{margin-top:22px;border-left:3px solid var(--teal);background:var(--soft);padding:14px 18px}.note{margin-top:16px;background:var(--warm);border-left:3px solid #cc9e55;padding:12px 16px;color:#664b28;font-size:14px}.source{margin-top:22px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.source a{color:inherit}.meta{font-size:13px;color:var(--muted);margin-top:24px}.table-wrap{overflow-x:auto;margin-top:18px}table{border-collapse:collapse;width:100%;font-size:15px}caption{text-align:left;font-size:13px;color:var(--muted);margin-bottom:8px}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}thead th{font-size:13px;color:var(--muted);font-weight:600;background:#f1f4ef}tbody th{font-weight:550}td.num,th.num{text-align:right;white-space:nowrap}.accent{color:var(--teal);font-weight:650}.compact th,.compact td{padding:7px 10px;font-size:14px}.flow{display:flex;gap:12px;align-items:stretch;margin-top:24px}.flow .step{flex:1;padding:16px;border:1px solid var(--line);border-radius:7px;min-width:0}.step .label{font-size:12px;color:var(--teal);font-weight:650;margin-bottom:6px}.flow .arrow{align-self:center;color:#8ca398;font-size:23px}.flow p{font-size:14px}.list{margin:10px 0 0;padding-left:20px}.list li{margin:8px 0}.plain-list{list-style:none;padding:0;margin:0}.plain-list li+li{margin-top:14px}.section-label{margin:23px 0 7px;color:var(--muted);font-size:13px;font-weight:600}.quote{font-size:17px;padding:15px 18px;background:#f1f4ef;border-radius:7px;margin:12px 0}.quote em{color:var(--red);font-style:normal;font-weight:650}.result-line{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line)}.result-line:last-child{border-bottom:0}.result-line strong{white-space:nowrap}.heatmap th:first-child{min-width:220px}.heatmap td{min-width:120px;text-align:center;vertical-align:middle}.heatmap thead th:not(:first-child){text-align:center}.heatmap .h0{color:#737e76;background:#f5f5f0}.heatmap .h1{background:#edf4ef}.heatmap .h2{background:#dcece2}.heatmap .h3{background:#c5e0d1}.heatmap .h4{background:#a8d1bd;color:#124b3a;font-weight:700}.heatmap .total{border-top:2px solid #9db5a8;font-weight:650}.heatmap .total td{background:#eff3ed}.heatmap .divider th,.heatmap .divider td{border-top:2px solid var(--line)}.heatmap .taskid{font:11px ui-monospace,monospace;color:var(--muted);margin-right:7px}.status{display:grid;grid-template-columns:95px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);font-size:14px}.status .tag{align-self:start;justify-self:start}.status:last-child{border-bottom:0}.references{font-size:13px;color:var(--muted);margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}.references ol{padding-left:20px;margin:10px 0}.references li{margin:7px 0}.footer{font-size:12px;color:var(--muted);padding:0 8px;text-align:center}
 @media screen and (max-width:760px){body{font-size:15px}.toolbar{padding:10px 16px;gap:14px}.brand{display:none}.toolbar nav{gap:15px}.print-button{font-size:12px}main{padding:0 12px;margin-top:16px}.page{padding:25px 22px;margin:14px 0}.grid,.grid.three{grid-template-columns:1fr;gap:13px}.flow{flex-direction:column}.flow .arrow{transform:rotate(90deg);line-height:1}.lede{font-size:18px}.question p{font-size:18px}.table-wrap{margin-inline:-4px}.heatmap th:first-child{min-width:175px}.heatmap td{min-width:110px}.box{padding:17px}.cover{padding-top:32px}.meta{line-height:1.8}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 @page{size:A4 landscape;margin:10mm}
 @media print{html{scroll-behavior:auto}body{background:white;font-size:11pt;line-height:1.48;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toolbar,.skip,.footer{display:none}main{max-width:none;padding:0;margin:0}.page{border:0;border-radius:0;box-shadow:none;margin:0;padding:4mm 5mm;break-after:page;scroll-margin:0}.page:last-child{break-after:auto}.page-head{margin-bottom:8px}h1{font-size:37pt}h2{font-size:23pt}h3{font-size:13pt}.eyebrow{font-size:9pt}.lede{font-size:15pt;margin-top:14px}.sub{margin:9px 0 15px}.grid{gap:15px;margin-top:15px}.box{padding:14px}.box p{font-size:10.5pt}.box .big{font-size:24pt}.flow{margin-top:16px;gap:9px}.flow .step{padding:12px}.flow p{font-size:10pt}.question p{font-size:15pt}.cover .question{margin-top:20px;padding:18px}.cover{padding-top:12mm}.table-wrap{overflow:visible;margin-top:12px}table{font-size:10.5pt}th,td{padding:7px 9px}.compact th,.compact td{padding:5px 8px;font-size:10pt}.heatmap th:first-child{min-width:0}.heatmap td{min-width:0}.note,.takeaway{margin-top:14px;padding:10px 14px;font-size:10pt}.source{margin-top:14px;padding-top:8px;font-size:8.5pt}.tag{font-size:8.5pt}.meta{font-size:9pt}.quote{font-size:12pt;padding:11px 14px}.status{padding:8px 0;font-size:10pt}.references{font-size:9pt;margin-top:14px;padding-top:10px}.references li{margin:4px 0}.list li{margin:5px 0}.small,small{font-size:9pt}thead{display:table-header-group}tr,.box,.note,.takeaway{break-inside:avoid}a{text-decoration:none}}
+
+/* Explanatory handout: readable prose, explicit methods, and result tables. */
+body{font-size:17px;line-height:1.65}h1{font-size:clamp(34px,4.2vw,52px)}h2{font-size:30px}.lede{font-size:21px}.page{padding:38px 42px}.sub{font-size:17px;max-width:900px}.labelled{margin-top:20px}.labelled h3{color:var(--teal);font-size:15px;letter-spacing:.4px;margin-bottom:7px}.box p{font-size:16px}.box .big{font-size:26px}.term-list{display:grid;grid-template-columns:160px 1fr;gap:10px 18px;margin:16px 0}.term-list dt{font-weight:650}.term-list dd{margin:0}.equation{padding:17px 20px;background:var(--blue-soft);border-radius:7px;margin:17px 0;line-height:1.55;font-size:17px}.procedure{padding-left:23px;margin:12px 0}.procedure li{padding-left:4px;margin:9px 0}.sample{border-left:3px solid var(--blue);padding:12px 17px;background:var(--blue-soft);margin-top:16px}.sample p{font-size:16px}.sample .label{font-size:12px;font-weight:650;color:var(--blue);letter-spacing:.5px;margin-bottom:5px}.conclusion{margin-top:20px;border-top:2px solid var(--teal);padding-top:13px}.conclusion strong{color:var(--teal)}.reading-note{font-size:14px;color:var(--muted);margin-top:12px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:26px}.headline{font-size:20px;font-weight:600}.page .table-wrap{margin-top:15px}.legend{font-size:13px;color:var(--muted);margin-top:9px}.flow .step strong{display:block;margin-bottom:5px}.heatmap th:first-child{min-width:265px}.references{font-size:14px}.statement{padding:16px 0;border-bottom:1px solid var(--line)}.statement:last-child{border-bottom:0}.statement h3{margin-bottom:5px}.statement p{margin:0}.compact-note{font-size:14px;color:var(--muted);margin-top:12px}
+@media screen and (max-width:760px){h1{font-size:31px;letter-spacing:-.6px}h2{font-size:25px}.columns{grid-template-columns:1fr;gap:15px}.term-list{grid-template-columns:1fr;gap:3px}.term-list dd{margin-bottom:12px}.page{padding:26px 22px}.sub{font-size:16px}.toolbar nav{min-width:0}.heatmap th:first-child{min-width:220px}}
+@media print{body{font-size:10.8pt;line-height:1.48}.page{padding:3mm 5mm;zoom:.88}.cover{padding-top:9mm}h1{font-size:34pt}h2{font-size:22pt;line-height:1.22}h3{font-size:12pt}.lede{font-size:14pt;line-height:1.5}.sub{font-size:11pt;margin:9px 0 14px}.box p{font-size:10.5pt}.box .big{font-size:19pt}.labelled{margin-top:14px}.labelled h3{font-size:10.5pt}.columns{gap:22px}.equation{font-size:11pt;padding:11px 14px;margin:12px 0}.procedure{margin:8px 0}.procedure li{margin:6px 0}.sample{margin-top:12px;padding:10px 13px}.sample p{font-size:10.5pt}.sample .label{font-size:8.5pt}.conclusion{margin-top:14px;padding-top:10px}.reading-note,.compact-note{font-size:9pt;margin-top:9px}.term-list{grid-template-columns:140px 1fr;gap:7px 15px}.statement{padding:10px 0}.references{font-size:9.5pt}.headline{font-size:13pt}.heatmap th:first-child{min-width:0}.table-wrap{margin-top:10px}.legend{font-size:8.5pt}.source{font-size:8.5pt}.meta{font-size:9pt}.tag{font-size:8pt}.page-head{margin-bottom:10px}.labelled,.sample,.conclusion{break-inside:avoid}}
+@media print{#transfer{zoom:.82}}
 </style>
 </head>
 <body>
-<a class="skip" href="#overview">跳到汇报正文</a>
+
+<a class="skip" href="#overview">Skip to report</a>
 <header class="toolbar">
   <div class="brand">LANG · VLA</div>
-  <nav aria-label="汇报目录"><a href="#overview">概览</a><a href="#setup">实验</a><a href="#words">文本干预</a><a href="#timing">改道窗口</a><a href="#proxy">代理指标</a><a href="#novel">新组合</a><a href="#transfer">研究方向</a><a href="#discussion">下一步</a></nav>
-  <button class="print-button" type="button" onclick="window.print()">打印 / 存为 PDF</button>
+  <nav aria-label="Report contents"><a href="#overview">Overview</a><a href="#setup">Setup</a><a href="#methods">Method</a><a href="#words">Wording</a><a href="#defaults">Defaults</a><a href="#timing">Timing</a><a href="#proxy">Metric</a><a href="#novel">New goals</a><a href="#transfer">Next study</a></nav>
+  <button class="print-button" type="button" onclick="window.print()">Print / Save PDF</button>
 </header>
 <main>
 <section class="page cover" id="overview" aria-labelledby="title">
-  <div class="page-head"><div class="eyebrow">Research progress · 导师汇报</div><div class="page-no">01 / 08</div></div>
-  <h1 id="title">VLA 如何使用语言？<br><span>从文本干预到知识迁移</span></h1>
-  <p class="lede">标准任务的高成功率，并不保证模型能稳定理解改写、在执行中接受新指令，或完成熟悉物体与目的地的新组合。</p>
+  <div class="page-head"><div class="eyebrow">Research progress · Advisor briefing</div><div class="page-no">01 / 12</div></div>
+  <h1 id="title">How do robot policies<br><span>use language?</span></h1>
+  <p class="lede">We tested whether vision-language-action models follow the meaning of an instruction, remain responsive to language during execution, and combine familiar objects with new destinations.</p>
+  <div class="labelled"><h3>The starting observation</h3><p>A robot can pick up the correct object and still fail after an instruction is reworded. A final success score does not tell us whether the problem arose before the grasp, during transport, or when choosing where to place the object.</p></div>
   <div class="grid three">
-    <div class="box"><span class="tag">执行阶段</span><div class="big">有限的改道窗口</div><p>碗抓起后仍能改道，随运输进度逐渐关闭；酒瓶更早失去改道能力。</p></div>
-    <div class="box"><span class="tag">文本内容</span><div class="big">词与默认去向</div><p>部分目标词改写会改变行为。OFT 遇到陌生目标词时，与空指令呈现相同的默认去向分布。</p></div>
-    <div class="box"><span class="tag">组合泛化</span><div class="big">高分 ≠ 会组合</div><p>Goal 单套训练的两个模型，在 5 个“物体到新目的地”目标上均为 0/100。</p></div>
+    <div class="box"><span class="tag">Wording</span><div class="big">Some words redirect behavior</div><p>Particular destination words cause failures after a correct grasp. Unusable destination words can produce the same behavior as no instruction.</p></div>
+    <div class="box"><span class="tag">Timing</span><div class="big">Responsiveness has a window</div><p>A held bowl can still be redirected early in transport. This becomes much harder later; bottle tasks show earlier and stronger constraints.</p></div>
+    <div class="box"><span class="tag">Generalization</span><div class="big">Familiar skills do not always combine</div><p>Two Goal-only models score 0/100 on five new object–destination combinations, despite high success on standard tasks.</p></div>
   </div>
-  <div class="question"><div class="eyebrow">正在推进的研究问题</div><p>什么样的物理世界知识，能够从 VLM 迁移到机器人控制？</p><p class="english">What Makes Physical Knowledge Transferable from Vision-Language Models to Robotic Control?</p></div>
-  <p class="meta">整理日期：2026-10-19 · 依据当前实验文档与已提供的运行结果 · 建议汇报时间：10–15 分钟<br>前六页汇报已完成实验；最后两页区分当前准备、研究假设与待完成验证。</p>
+  <div class="question"><div class="eyebrow">The next research question</div><p>What makes physical knowledge transferable from vision-language models to robotic control?</p></div>
+  <p class="meta">Prepared 19 October 2026 · Expanded explanation of existing results<br>Sections 2–9 explain the experiments. Sections 10–11 distinguish possible causes from the proposed transfer study. Section 12 records evidence limits and sources.</p>
 </section>
 
 <section class="page" id="setup" aria-labelledby="setup-title">
-  <div class="page-head"><div class="eyebrow">实验基础与方法</div><div class="page-no">02 / 08</div></div>
-  <h2 id="setup-title">在同一机器人状态下改变语言，观察行为怎样改变</h2>
-  <p class="sub">主要使用 LIBERO-Goal 的 10 个任务；文本来自原始指令、LIBERO-Para 改写、空指令和无意义词。</p>
-  <div class="flow" aria-label="状态匹配分叉实验流程">
-    <div class="step"><div class="label">采集</div><strong>按原指令执行</strong><p>记录抓取、运输等阶段的状态。</p></div><span class="arrow" aria-hidden="true">→</span>
-    <div class="step"><div class="label">恢复</div><strong>固定同一分叉起点</strong><p>恢复仿真、设施位置、夹爪状态，并清空动作队列。</p></div><span class="arrow" aria-hidden="true">→</span>
-    <div class="step"><div class="label">干预</div><strong>只替换接续指令</strong><p>原句 / 改写 / 空指令 / 另一个目标。</p></div><span class="arrow" aria-hidden="true">→</span>
-    <div class="step"><div class="label">测量</div><strong>闭环执行到结束</strong><p>记录成功、新目标完成率与其他已满足目标。</p></div>
-  </div>
-  <div class="grid">
-    <div>
-      <h3>先验证评测接入：E0</h3>
-      <div class="table-wrap"><table class="compact"><caption>每模型、每 suite 为 10 任务 × 50 次。</caption><thead><tr><th scope="col">模型</th><th scope="col" class="num">Goal</th><th scope="col" class="num">Spatial</th></tr></thead><tbody>
+  <div class="page-head"><div class="eyebrow">Background · What is being tested?</div><div class="page-no">02 / 12</div></div>
+  <h2 id="setup-title">The scene is familiar. The language is what we change.</h2>
+  <p class="sub">A <strong>VLM</strong> processes images and language. A <strong>VLA policy</strong> uses visual observations and an instruction to produce robot actions. Here, an episode is a complete simulated attempt at a task.</p>
+  <div class="columns">
+    <div class="labelled"><h3>Environment</h3><p>LIBERO-Goal contains 10 manipulation tasks in a shared scene setting, with a bowl, cream cheese, a wine bottle, a plate, a cabinet, a stove, and a wine rack. Familiar goals include placing the bowl on the plate or on the cabinet.</p><p>Sharing a scene does not make every episode physically identical. The controlled branching experiment explicitly restores the same intermediate state before changing the instruction.</p></div>
+    <div class="labelled"><h3>First, check that the evaluation works</h3><div class="table-wrap"><table class="compact"><caption>E0: original instructions; 500 episodes per evaluated suite.</caption><thead><tr><th scope="col">Checkpoint</th><th scope="col" class="num">Goal</th><th scope="col" class="num">Spatial</th></tr></thead><tbody>
       <tr><th scope="row">VLA-Adapter Pro</th><td class="num">97.4%</td><td class="num">98.2%</td></tr>
-      <tr><th scope="row">OFT（单 suite）</th><td class="num">97.4%</td><td class="num">97.2%</td></tr>
-      <tr><th scope="row">OFT（四 suite）</th><td class="num">96.4%</td><td class="num">未测</td></tr>
-      <tr><th scope="row">π0.5</th><td class="num">96.8%</td><td class="num">未测</td></tr>
-      </tbody></table></div>
-      <p class="small muted" style="margin-top:10px">这些是独立的复现批次，不与后面的新目标评测混作同一组样本。</p>
-    </div>
-    <div class="box"><h3>已完成的实验链</h3><ul class="plain-list">
-      <li><strong>E1 / E3：</strong>改写、虚词、词序、空指令和无意义词干预。</li>
-      <li><strong>E4：</strong>在不同执行阶段切换目标，测改道窗口。</li>
-      <li><strong>E6：</strong>前向动作变化能否预测改写失败。</li>
-      <li><strong>N0：</strong>4 个模型、9 个新目标，每目标 20 个初始状态。</li>
-    </ul></div>
+      <tr><th scope="row">OpenVLA-OFT, one suite</th><td class="num">97.4%</td><td class="num">97.2%</td></tr>
+      <tr><th scope="row">OpenVLA-OFT, four suites</th><td class="num">96.4%</td><td class="num">Not evaluated</td></tr>
+      <tr><th scope="row">π0.5</th><td class="num">96.8%</td><td class="num">Not evaluated</td></tr>
+    </tbody></table></div></div>
   </div>
-  <div class="takeaway"><strong>可复用的基础设施：</strong>状态恢复、指令分叉、目标谓词追踪和多模型接入。π0.5 与 StarVLA 的最新试跑均在 12 个状态上通过同指令、同随机性下的逐位复现检查。</div>
-  <p class="source">来源：<a href="#sources">[1]</a> E0、E3、π0.5 / StarVLA 适配器验证；<a href="#sources">[3]</a> 状态恢复与评测实现。工程复现检查用于验证测量工具，不代表语言泛化能力。</p>
+  <div class="table-wrap"><table><caption>Three different questions require three different language interventions.</caption><thead><tr><th scope="col">Test</th><th scope="col">Example</th><th scope="col">What should happen?</th></tr></thead><tbody>
+    <tr><th scope="row">Paraphrase robustness</th><td>“bowl on the plate” → “vessel on the platter”</td><td>Preserve the intended goal.</td></tr>
+    <tr><th scope="row">Mid-execution redirection</th><td>“bowl on the plate” → “bowl on the stove”</td><td>Change the goal, if the new action is still feasible.</td></tr>
+    <tr><th scope="row">New goal combinations</th><td>“cream cheese on the plate”</td><td>Combine a familiar object and destination in a pairing absent from the Goal training tasks.</td></tr>
+  </tbody></table></div>
+  <div class="conclusion"><strong>Why the baseline matters.</strong> These checkpoints can execute the familiar tasks. The later failures therefore identify limitations beyond simply being unable to control the robot in this environment.</div>
+  <p class="source">Sources: [1] E0; [2] experimental setting. StarVLA was added later: its separate 10-task, 20-episode-per-task check averaged 98%. These checks use different batches from the new-goal experiment.</p>
+</section>
+
+<section class="page" id="methods" aria-labelledby="methods-title">
+  <div class="page-head"><div class="eyebrow">Method · How do we locate a language failure?</div><div class="page-no">03 / 12</div></div>
+  <h2 id="methods-title">Save one grasp state, then test different continuations</h2>
+  <div class="labelled"><h3>Question</h3><p>If a paraphrased instruction leads to a failed placement, did it already cause a bad grasp, or did the text affect the policy after the grasp? Comparing two complete episodes cannot separate these possibilities because their trajectories may differ from the beginning.</p></div>
+  <div class="flow" aria-label="Controlled branching procedure">
+    <div class="step"><div class="label">1 · COLLECT</div><strong>Reach a stable grasp</strong><p>Run the policy with an original instruction or a selected paraphrase.</p></div><span class="arrow" aria-hidden="true">→</span>
+    <div class="step"><div class="label">2 · SNAPSHOT</div><strong>Save the full state</strong><p>Preserve the robot, objects, fixture positions, and gripper state.</p></div><span class="arrow" aria-hidden="true">→</span>
+    <div class="step"><div class="label">3 · BRANCH</div><strong>Restore and change text</strong><p>Start each continuation from that same snapshot. Clear queued actions.</p></div><span class="arrow" aria-hidden="true">→</span>
+    <div class="step"><div class="label">4 · EXECUTE</div><strong>Observe the outcome</strong><p>Let the robot act with visual feedback; check which goal it completes.</p></div>
+  </div>
+  <div class="table-wrap"><table><caption>The original/paraphrase comparison uses both the instruction before the grasp and the instruction after it.</caption><thead><tr><th scope="col">Instruction used to reach the grasp</th><th scope="col">Continue with original wording</th><th scope="col">Continue with paraphrased wording</th></tr></thead><tbody>
+    <tr><th scope="row">Original wording</th><td>Reference continuation.</td><td>If this fails, changing text after the grasp can cause a failure from an otherwise usable state.</td></tr>
+    <tr><th scope="row">Paraphrased wording</th><td>If this succeeds, that grasp state can still complete the intended task with the original wording.</td><td>Measures continued behavior under the paraphrase.</td></tr>
+  </tbody></table></div>
+  <div class="sample"><div class="label">CONCRETE EXAMPLE</div><p>The robot is already holding the bowl. Restore that exact state twice: once continue with “put the bowl on top of the cabinet,” and once with “put the bowl on top of the locker.” Any resulting difference cannot be explained by the two branches having picked up different objects.</p></div>
+  <div class="conclusion"><strong>What this establishes.</strong> The intervention can locate a behavioral effect of language after a particular state. It does not, by itself, identify which internal representation or neural module caused the effect.</div>
+  <p class="source">Sources: [1] E3; [3] restoration fixes. Early runs reproduced outcomes but had a few non-identical trajectories. Later restoration checks were tightened; π0.5 and StarVLA each passed 12 same-state, same-instruction repeats with identical actions under controlled randomness.</p>
 </section>
 
 <section class="page" id="words" aria-labelledby="words-title">
-  <div class="page-head"><div class="eyebrow">发现一 · 文本干预</div><div class="page-no">03 / 08</div></div>
-  <h2 id="words-title">词的变化比表面扰动更有影响；部分失败落到默认去向</h2>
-  <p class="sub">在匹配的抓取状态上接续不同文本，能够定位“抓对了物体，却放错位置”的一部分原因。</p>
-  <div class="grid">
-    <div class="box">
-      <h3>大多数改写在抓取后影响较小</h3>
-      <div class="table-wrap"><table class="compact"><caption>E3 接续成功率；文档报告的百分比经过取整。</caption><thead><tr><th scope="col">抓起后的指令</th><th scope="col" class="num">OFT</th><th scope="col" class="num">VLA-Adapter</th></tr></thead><tbody>
-      <tr><th scope="row">原指令</th><td class="num">99%</td><td class="num">96%</td></tr>
-      <tr><th scope="row">LIBERO-Para 改写</th><td class="num">98%</td><td class="num">96%</td></tr>
-      <tr><th scope="row">仅虚词扰动</th><td class="num">99%</td><td class="num">96%</td></tr>
-      </tbody></table></div>
-      <p class="small muted" style="margin-top:12px">E1 中 VLA-Adapter 的原任务成功率：打乱词序 84%，空指令 7%，换成其他任务指令 0%。最后一项不表示它没有执行其他任务。</p>
-    </div>
-    <div class="box">
-      <h3>特定措辞仍会在抓取后改变去向</h3>
-      <div class="quote">put the bowl on top of the <em>locker</em></div>
-      <p>OFT 已抓起碗后换成这句：</p>
-      <div class="result-line"><span>完成原目标：柜顶</span><strong>4 / 20</strong></div>
-      <div class="result-line"><span>完成其他目标：灶台</span><strong>16 / 20</strong></div>
-      <p class="small muted" style="margin-top:12px">最初每任务仅 1 条来源改写；扩展到 3 条后，抓起后的失败仍集中在碗任务和部分措辞，不能推广到所有改写。</p>
-    </div>
+  <div class="page-head"><div class="eyebrow">Experiment 1 · What kinds of wording matter?</div><div class="page-no">04 / 12</div></div>
+  <h2 id="words-title">Most tested changes were harmless after grasping; some were not</h2>
+  <div class="labelled"><h3>What we did</h3><p>At saved grasp states, we compared original instructions, LIBERO-Para paraphrases, and changes to function words. Function words are grammatical words such as articles; content words name the action, object, or destination. These tests ask whether failure is a generic response to any textual change.</p></div>
+  <div class="columns">
+    <div class="labelled"><h3>Broad result: high continuation success</h3><div class="table-wrap"><table class="compact"><caption>E3 aggregate rates, rounded as in the experiment record.</caption><thead><tr><th scope="col">Text after grasp</th><th scope="col" class="num">OFT</th><th scope="col" class="num">VLA-Adapter</th></tr></thead><tbody>
+      <tr><th scope="row">Original</th><td class="num">99%</td><td class="num">96%</td></tr>
+      <tr><th scope="row">Sampled paraphrases</th><td class="num">98%</td><td class="num">96%</td></tr>
+      <tr><th scope="row">Function-word perturbations</th><td class="num">99%</td><td class="num">96%</td></tr>
+    </tbody></table></div><p class="reading-note">The reported OFT original comparison has n = 140; its paraphrase/control groups each have n = 420. The selected phrases below are specific cases, not the average of this table.</p></div>
+    <div class="labelled"><h3>Specific result: a destination synonym changes behavior</h3><div class="quote">put the bowl on top of the <em>locker</em></div><p>Starting from original-instruction grasp states, OFT placed the bowl on the cabinet in <strong>4/20</strong> branches and on the stove in <strong>16/20</strong>.</p><p>In the complementary test, grasp states collected using this paraphrase could complete the cabinet task in <strong>15/20</strong> continuations when the original wording was restored.</p></div>
   </div>
-  <div class="table-wrap"><table class="compact"><thead><tr><th scope="col">无意义目标词实验 H3′</th><th scope="col">观察</th><th scope="col">预先写定规则的判定</th></tr></thead><tbody>
-    <tr><th scope="row">OFT</th><td>抓起碗后，blicket / dax 与空指令的结果分布相同，TV = 0.00；倾向灶台。</td><td><span class="tag">支持</span></td></tr>
-    <tr><th scope="row">VLA-Adapter</th><td>既有去柜顶的倾向，也有继续原任务的情况；默认去向与轨迹惯性混合。</td><td><span class="tag explore">未满足全部预测</span></td></tr>
+  <div class="labelled"><h3>How to interpret the combination of results</h3><p>A blanket claim that “any wording change breaks control” does not explain the near-identical aggregate rates for original text and function-word changes. The locker example shows that particular content-word changes can still affect destination selection after grasping. Successful rescue with the original wording shows that many paraphrase-sourced grasps remain usable.</p></div>
+  <div class="note"><strong>Scope:</strong> the first selected-phrase test used one source paraphrase per task. With three source paraphrases per task, failures still concentrated in bowl tasks, while overall continuation success was 92% for both models. The finding is about particular tasks and phrases, not all paraphrases.</div>
+  <p class="compact-note"><strong>Related E1 result:</strong> shuffling instruction words preserved 84% original-task success; empty text gave 7%, and another task’s instruction gave 0%. That last score checks the original goal, so it does not tell us whether the newly requested task was followed. The 97.4% E0 reference is a separate evaluation batch.</p>
+  <p class="source">Source: [1] E1, F1–F2, selected source phrases, and the three-source-paraphrase follow-up.</p>
+</section>
+
+<section class="page" id="defaults" aria-labelledby="defaults-title">
+  <div class="page-head"><div class="eyebrow">Experiment 2 · What happens when the destination word is unusable?</div><div class="page-no">05 / 12</div></div>
+  <h2 id="defaults-title">An unfamiliar word can behave like an empty instruction</h2>
+  <div class="labelled"><h3>Question and procedure</h3><p>Does an unrecognized destination make the policy choose arbitrarily, continue its original plan, or fall back to a recurring destination? We collected original-instruction grasp states, then replaced the destination noun with invented words such as <em>blicket</em> and <em>dax</em>. We compared these branches with empty text and with the original instruction.</p></div>
+  <div class="table-wrap"><table><caption>OFT: three bowl tasks, 10 saved states per task. Counts below identify the completed destination.</caption><thead><tr><th scope="col">Original intended destination</th><th scope="col">Original text</th><th scope="col">Empty text</th><th scope="col">“blicket” destination</th><th scope="col">“dax” destination</th></tr></thead><tbody>
+    <tr><th scope="row">Stove</th><td>Stove: 10/10</td><td>Stove: 10/10</td><td>Stove: 10/10</td><td>Stove: 10/10</td></tr>
+    <tr><th scope="row">Cabinet top</th><td>Cabinet: 10/10</td><td>Stove: 9/10</td><td>Stove: 9/10</td><td>Stove: 9/10</td></tr>
+    <tr><th scope="row">Plate</th><td>Plate: 10/10</td><td>Stove: 8/10</td><td>Stove: 8/10</td><td>Stove: 8/10</td></tr>
   </tbody></table></div>
-  <div class="takeaway"><strong>支持的解释：</strong>部分目标词具有类似检索键的作用。原目标恰好等于默认去向时，改写成功本身不足以证明理解了改写。</div>
-  <p class="source">来源：<a href="#sources">[1]</a> F1、F2、F5、来源改写补充、H3′。TV 为分布的总变差距离。最初词类观察属于探索性结果；H3′ 是后续按预先写定规则的检验。</p>
+  <div class="labelled"><h3>Result and explanation</h3><p>The complete measured outcome distributions for invented destination words and empty text matched: <strong>total variation distance = 0.00</strong>. This distance measures how different two outcome distributions are; zero means no difference in the observed distributions. For OFT, the stove is a recurring fallback destination in these held-bowl states.</p><p>Changing the <em>object</em> noun to an invented word after the bowl had already been grasped preserved the intended goal in all 10 states of each task. At that stage, object identity is already established physically, while the destination can still need disambiguation.</p></div>
+  <div class="columns">
+    <div class="sample"><div class="label">WHY SUCCESS ALONE CAN MISLEAD</div><p>If the intended destination is already the stove, OFT can succeed even with empty text. Likewise, VLA-Adapter’s 20/20 success on the selected “locker” phrase is compatible with its tendency to place the bowl on the cabinet. Success alone does not distinguish understanding from a matching fallback.</p></div>
+    <div class="sample"><div class="label">THE SECOND MODEL IS DIFFERENT</div><p>VLA-Adapter sometimes goes to the cabinet and sometimes continues toward the previous destination. For the plate task, “dax” kept the plate destination in 10/10 cases. Its behavior does not satisfy all of the predefined default-destination predictions.</p></div>
+  </div>
+  <div class="conclusion"><strong>Conclusion.</strong> The OFT observations support a destination-key/fallback account in this setting. This is a behavioral explanation; we have not identified an internal lookup table or proved that it explains every failure. The follow-up hypothesis H3′ is supported for OFT and not fully supported for VLA-Adapter.</div>
+  <p class="source">Source: [1] H3′ invented-word follow-up, F5, and selected source phrases. All “default” statements here refer to the tested intermediate states.</p>
 </section>
 
 <section class="page" id="timing" aria-labelledby="timing-title">
-  <div class="page-head"><div class="eyebrow">发现二 · 语言起作用的时间</div><div class="page-no">04 / 08</div></div>
-  <h2 id="timing-title">碗抓起后仍能改道，但窗口会随执行进度关闭</h2>
-  <p class="sub">切换到同一物体的另一个目标。f 为执行新目标的比例；q 为原轨迹中“抓取到目标完成”的进度。</p>
-  <div class="table-wrap"><table><caption>H1″：按阶段进度切换，2026-10-17c 批次；括号为 95% 置信区间。</caption><thead><tr><th scope="col">模型与物体</th><th scope="col" class="num">刚抓起 q = 0</th><th scope="col" class="num">q = 25%</th><th scope="col" class="num">q = 50%</th><th scope="col" class="num">q = 75%</th></tr></thead><tbody>
-    <tr><th scope="row">VLA-Adapter · 碗</th><td class="num">88% <small>[80, 94]</small></td><td class="num accent">53% <small>[45, 61]</small></td><td class="num">7%</td><td class="num">0%</td></tr>
-    <tr><th scope="row">OFT · 碗</th><td class="num">91% <small>[83, 97]</small></td><td class="num accent">28% <small>[18, 38]</small></td><td class="num">0%</td><td class="num">0%</td></tr>
-    <tr><th scope="row">两个模型 · 酒瓶</th><td class="num">0%</td><td class="num">0%</td><td class="num">0%</td><td class="num">0%*</td></tr>
+  <div class="page-head"><div class="eyebrow">Experiment 3 · When can language still change the goal?</div><div class="page-no">06 / 12</div></div>
+  <h2 id="timing-title">A bowl remains redirectable early after grasping</h2>
+  <div class="labelled"><h3>What we did and what the numbers mean</h3><p>Run an original task, save states at different times, and branch to another destination for the <strong>same object</strong>. For example, switch from “bowl on the plate” to “bowl on the stove.” The redirection rate <strong>f</strong> is the proportion completing the newly requested goal.</p><p>To align tasks of different lengths, <strong>q</strong> measures elapsed steps from stable grasp to completion of the original goal. Thus q = 25% means one quarter of that time interval, not one quarter of the spatial distance. A same-state continuation with the original instruction checks that restarting still works.</p></div>
+  <div class="table-wrap"><table><caption>E4 phase-aligned follow-up, H1″. Brackets show the recorded 95% confidence intervals.</caption><thead><tr><th scope="col">Policy / object</th><th scope="col" class="num">At grasp</th><th scope="col" class="num">q = 25%</th><th scope="col" class="num">q = 50%</th><th scope="col" class="num">q = 75%</th></tr></thead><tbody>
+    <tr><th scope="row">VLA-Adapter / bowl</th><td class="num">88% <small>[80, 94]</small></td><td class="num accent">53% <small>[45, 61]</small></td><td class="num">7%</td><td class="num">0%</td></tr>
+    <tr><th scope="row">OFT / bowl</th><td class="num">91% <small>[83, 97]</small></td><td class="num accent">28% <small>[18, 38]</small></td><td class="num">0%</td><td class="num">0%</td></tr>
+    <tr><th scope="row">Both policies / bottle</th><td class="num">0%</td><td class="num">0%</td><td class="num">0%</td><td class="num">0%*</td></tr>
   </tbody></table></div>
-  <div class="grid">
-    <div class="box soft"><h3>确定的行为差异</h3><p>碗在抓取后仍有可观察的改道窗口。酒瓶在较早的 E4 批次中，抓取前 20 步切换的新目标执行率就已为 0。</p><p>按 H1″ 的预设阈值：<strong>VLA-Adapter 支持；OFT 未达到全部预测，但未触发反证。</strong></p></div>
-    <div class="box"><span class="tag explore">机制解释仍待检验</span><h3 style="margin-top:10px">可能取决于任务从哪里开始分叉</h3><p>碗的多个去向可以共享抓取动作；酒瓶的不同去向可能需要不同抓法。“先开抽屉再放碗”也更早失去改道能力。</p><p>这提示动作兼容性和数据分歧可能重要，尚未建立因果关系。</p></div>
-  </div>
-  <div class="note"><strong>一次重要的实验修正：</strong>原 H1′ 使用固定的“抓起后 +20 步”，部分任务此时已接近完成，两个模型均触发反证。保留原判定，再用独立写定的 H1″ 改为按进度取样；两批场景不同，不能逐条配对。</div>
-  <p class="source">来源：<a href="#sources">[1]</a> E4、H1′ 有效性核查、H1″。* 酒瓶 q = 75% 的原指令重启成功率也只有 55–57%，该点不能单独说明语言不起作用；q = 25% 的原指令基线为 95–100%。</p>
+  <div class="labelled"><h3>How to read this result</h3><p>For VLA-Adapter, changing the instruction at q = 25% still produces the new bowl destination in 53% of the evaluated branches. By q = 50%, that rate is 7%. Original-instruction bowl continuations succeed in 97–100% across these times, so the decline is not explained by restarting alone.</p><p>The tested bottle branches show no redirection in this phase-aligned batch. An earlier timing experiment also found zero redirection 20 steps before the grasp. This supports an earlier constraint on bottle redirection, rather than a universal moment at which every task stops responding to language.</p></div>
+  <div class="conclusion"><strong>Conclusion.</strong> Language can affect the goal after grasping, but the available window depends on the task and state. Under the predefined H1″ rule, VLA-Adapter is supported; OFT’s 28% misses the predicted ≥50% at q = 25%, but does not trigger the ≤20% refutation threshold.</div>
+  <p class="compact-note">* Bottle original-instruction restarts at q = 75% succeed only 55–57%, so that late point is inconclusive. Earlier E3 snapshots allowed bottle cabinet-to-rack redirection in 13/40 OFT and 8/40 VLA-Adapter branches; the reverse direction was 0/40. The E4 zeros therefore should not be generalized to every bottle state or direction.</p>
+  <p class="source">Sources: [1] F4, E4 and H1″; [2] §3.3. A discarded timing choice and the distinction between observed responsiveness and its mechanism are explained in Sections 10 and 12.</p>
 </section>
 
 <section class="page" id="proxy" aria-labelledby="proxy-title">
-  <div class="page-head"><div class="eyebrow">发现三 · 低成本测量与数据效应</div><div class="page-no">05 / 08</div></div>
-  <h2 id="proxy-title">初始观测上的动作变化，可以预测改写后的失败</h2>
-  <p class="sub">在相同观测上比较原句、改写和其他任务的动作输出。R_action 用“换成其他任务”的动作差异归一化改写造成的动作差异。</p>
-  <div class="table-wrap"><table><caption>E6 与 LIBERO-Para 对齐，每模型 3,889 条改写；AUC 衡量对失败的排序能力。</caption><thead><tr><th scope="col">预测指标</th><th scope="col" class="num">VLA-Adapter</th><th scope="col" class="num">OFT</th></tr></thead><tbody>
-    <tr><th scope="row">1 − 句子结构相似度</th><td class="num">0.573</td><td class="num">0.496</td></tr>
-    <tr><th scope="row">1 − 关键词相似度</th><td class="num">0.759</td><td class="num">0.769</td></tr>
+  <div class="page-head"><div class="eyebrow">Experiment 4 · Can we predict a wording failure cheaply?</div><div class="page-no">07 / 12</div></div>
+  <h2 id="proxy-title">An offline action difference predicts paraphrase failures</h2>
+  <div class="labelled"><h3>What we did</h3><p>Hold the initial visual observation fixed. Run the policy with the original instruction, a paraphrase, and the other Goal-task instructions. Compare the predicted <strong>action chunks</strong>, which are short sequences of robot commands. No robot execution is needed to compute this score.</p></div>
+  <div class="equation"><strong>R_action</strong> = action-chunk distance between original and paraphrase<br>÷ average action-chunk distance between original and the other task instructions.</div>
+  <p>Near 0 means the paraphrase barely changes the output. Near 1 means it changes the output as much as a typical different task. The score can exceed 1; it is not a probability. Original and other-task outputs can be reused across paraphrases.</p>
+  <div class="table-wrap"><table><caption>Join scores to recorded LIBERO-Para rollout outcomes: 3,889 matched paraphrases per model.</caption><thead><tr><th scope="col">Score used to predict failure</th><th scope="col" class="num">VLA-Adapter AUC</th><th scope="col" class="num">OFT AUC</th></tr></thead><tbody>
+    <tr><th scope="row">1 − sentence-structure similarity</th><td class="num">0.573</td><td class="num">0.496</td></tr>
+    <tr><th scope="row">1 − keyword similarity</th><td class="num">0.759</td><td class="num">0.769</td></tr>
     <tr><th scope="row">R_action</th><td class="num accent">0.798 <small>[0.785, 0.812]</small></td><td class="num accent">0.866 <small>[0.854, 0.877]</small></td></tr>
   </tbody></table></div>
-  <div class="grid">
-    <div class="box soft"><h3>用途：快速筛查语言脆弱性</h3><p>R_action 从最低五分位升至最高五分位时：</p><div class="result-line"><span>VLA-Adapter 的成功率</span><strong>84.5% → 14.1%</strong></div><div class="result-line"><span>OFT 的成功率</span><strong>93.6% → 14.5%</strong></div><p style="margin-top:12px">指标只需固定观测上的前向对比，不需要为每条新改写另跑完整轨迹。</p></div>
-    <div class="box"><h3>同结构模型也会因数据范围而变化</h3><p>OFT 从 Goal 单套训练改成四 suite 联合训练：</p><div class="result-line"><span>物体词改写 R_action</span><strong>0.297 → 0.454</strong></div><div class="result-line"><span>空指令 R_action</span><strong>1.003 → 1.494</strong></div><p class="small muted" style="margin-top:12px">动作对文本更敏感，不等于语义理解更好。该比值的归一化分母也可能随训练变化。</p></div>
-  </div>
-  <div class="note">当前 AUC 来自同类初始观测，LIBERO-Para 每条改写只有一次 rollout。仍需对关键词基线做配对差异检验，并验证跨状态的预测能力；不能把 AUC 直接解释成语言理解或因果使用的证据。</div>
-  <p class="source">来源：<a href="#sources">[1]</a> E6、E6 → LIBERO-Para、2026-10-17 补充核查。置信区间沿用原结果记录，未在本汇报中重新估计。</p>
+  <div class="labelled"><h3>What does AUC = 0.866 mean?</h3><p>Choose a failed paraphrase and a successful paraphrase at random. The score ranks the failed one as riskier about 86.6% of the time, counting ties as half. It does <strong>not</strong> mean the robot succeeds 86.6% of the time, or that a classification threshold has 86.6% accuracy.</p><p>As R_action increases from its lowest fifth to its highest fifth, recorded success falls from <strong>84.5% to 14.1%</strong> for VLA-Adapter and from <strong>93.6% to 14.5%</strong> for OFT.</p></div>
+  <div class="conclusion"><strong>Conclusion.</strong> A fixed-observation output comparison is a useful candidate for screening language fragility. It measures predictive association, not semantic understanding. On the same resampled paraphrases, R_action beats keyword similarity by +0.039 [+0.022, +0.058] AUC for VLA-Adapter and +0.096 [+0.082, +0.110] for OFT (paired bootstrap, 2,000 resamples). Validation on different starting states remains to be done.</div>
+  <p class="source">Sources: [1] E6 → LIBERO-Para; [3] score and AUC implementations. Scores are averaged over available E6 initial observations; LIBERO-Para has one rollout per paraphrase from init 0. This shared early-state setting limits generalization of the reported AUC.</p>
 </section>
 
 <section class="page" id="novel" aria-labelledby="novel-title">
-  <div class="page-head"><div class="eyebrow">发现四 · 新组合目标</div><div class="page-no">06 / 08</div></div>
-  <h2 id="novel-title">模型能否把已见物体、目的地和步骤重新组合？</h2>
-  <p class="sub">每格 20 次。前两个模型只用 Goal 微调；后两个为四 suite 模型，预训练和架构也不同。</p>
-  <div class="table-wrap"><table class="heatmap compact"><caption>N0 成功率；★ 为目前没有成功执行证据、仍需单独检查可行性的目标。</caption><thead><tr><th scope="col">指令 / 目标</th><th scope="col">VLA-Adapter<br><small>Goal</small></th><th scope="col">OFT<br><small>Goal</small></th><th scope="col">π0.5<br><small>四 suite</small></th><th scope="col">StarVLA<br><small>四 suite</small></th></tr></thead><tbody>
-    <tr><th scope="row"><span class="taskid">n0</span>奶酪 → 盘子</th><td class="h0">0%</td><td class="h0">0%</td><td class="h3">50%</td><td class="h2">30%</td></tr>
-    <tr><th scope="row"><span class="taskid">n1</span>奶酪 → 灶台</th><td class="h0">0%</td><td class="h0">0%</td><td class="h3">55%</td><td class="h4">95%</td></tr>
-    <tr><th scope="row"><span class="taskid">n2</span>奶酪 → 柜顶</th><td class="h0">0%</td><td class="h0">0%</td><td class="h4">90%</td><td class="h1">5%</td></tr>
-    <tr><th scope="row"><span class="taskid">n3</span>酒瓶 → 盘子</th><td class="h0">0%</td><td class="h0">0%</td><td class="h1">10%</td><td class="h1">5%</td></tr>
-    <tr><th scope="row"><span class="taskid">n4</span>酒瓶 → 灶台</th><td class="h0">0%</td><td class="h0">0%</td><td class="h2">40%</td><td class="h1">10%</td></tr>
-    <tr class="divider"><th scope="row"><span class="taskid">n5</span>碗 → 灶台前 ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
-    <tr><th scope="row"><span class="taskid">n6</span>开顶层抽屉 + 放入奶酪 ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
-    <tr><th scope="row"><span class="taskid">n7</span>打开顶层抽屉</th><td class="h0">0%</td><td class="h3">60%</td><td class="h0">0%</td><td class="h4">85%</td></tr>
-    <tr><th scope="row"><span class="taskid">n8</span>打开底层抽屉 ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
-    <tr class="total"><th scope="row">n0–n4：物体到新目的地</th><td>0 / 100</td><td>0 / 100</td><td>49 / 100</td><td>29 / 100</td></tr>
-    <tr class="total"><th scope="row">全部 9 个目标</th><td>0 / 180</td><td>12 / 180</td><td>49 / 180</td><td>46 / 180</td></tr>
+  <div class="page-head"><div class="eyebrow">Experiment 5 · Do familiar skills combine?</div><div class="page-no">08 / 12</div></div>
+  <h2 id="novel-title">New instructions expose a gap hidden by standard success</h2>
+  <p class="sub">Evaluate nine goals absent from the Goal training task list, with 20 initial states per goal. Keep the familiar scene setting and change the requested goal predicate. This is a new-goal test, not a synonym test.</p>
+  <div class="sample"><div class="label">EXAMPLE OF A NEW COMBINATION</div><p>Goal demonstrations include “cream cheese in the bowl” and “bowl on the plate.” The test asks for “cream cheese on the plate.” Both nouns are familiar; their requested relationship is new to the Goal task list. Broader training exposure of the four-suite models is not controlled here.</p></div>
+  <div class="table-wrap"><table class="heatmap compact"><caption>Success rates. Each cell contains 20 episodes. ★ marks a goal with no successful rollout yet; feasibility still needs verification.</caption><thead><tr><th scope="col">Requested goal</th><th scope="col">VLA-Adapter<br><small>Goal only</small></th><th scope="col">OFT<br><small>Goal only</small></th><th scope="col">π0.5<br><small>Four suites</small></th><th scope="col">StarVLA<br><small>Four suites</small></th></tr></thead><tbody>
+    <tr><th scope="row"><span class="taskid">n0</span>Cream cheese → plate</th><td class="h0">0%</td><td class="h0">0%</td><td class="h3">50%</td><td class="h2">30%</td></tr>
+    <tr><th scope="row"><span class="taskid">n1</span>Cream cheese → stove</th><td class="h0">0%</td><td class="h0">0%</td><td class="h3">55%</td><td class="h4">95%</td></tr>
+    <tr><th scope="row"><span class="taskid">n2</span>Cream cheese → cabinet top</th><td class="h0">0%</td><td class="h0">0%</td><td class="h4">90%</td><td class="h1">5%</td></tr>
+    <tr><th scope="row"><span class="taskid">n3</span>Wine bottle → plate</th><td class="h0">0%</td><td class="h0">0%</td><td class="h1">10%</td><td class="h1">5%</td></tr>
+    <tr><th scope="row"><span class="taskid">n4</span>Wine bottle → stove</th><td class="h0">0%</td><td class="h0">0%</td><td class="h2">40%</td><td class="h1">10%</td></tr>
+    <tr class="divider"><th scope="row"><span class="taskid">n5</span>Bowl → in front of stove ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
+    <tr><th scope="row"><span class="taskid">n6</span>Open top drawer + insert cheese ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
+    <tr><th scope="row"><span class="taskid">n7</span>Open top drawer</th><td class="h0">0%</td><td class="h3">60%</td><td class="h0">0%</td><td class="h4">85%</td></tr>
+    <tr><th scope="row"><span class="taskid">n8</span>Open bottom drawer ★</th><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td><td class="h0">0%</td></tr>
+    <tr class="total"><th scope="row">Object–destination goals, n0–n4</th><td>0 / 100</td><td>0 / 100</td><td>49 / 100</td><td>29 / 100</td></tr>
+    <tr class="total"><th scope="row">All nine goals</th><td>0 / 180</td><td>12 / 180</td><td>49 / 180</td><td>46 / 180</td></tr>
   </tbody></table></div>
-  <div class="takeaway"><strong>总分接近，能力分布不同：</strong>π0.5 与 StarVLA 合计为 49 和 46 次成功，但“奶酪到柜顶”为 90% 对 5%，“开顶层抽屉”为 0% 对 85%。当前组合能力具有明显的目标依赖性，不能据总分归因于上游强弱。</div>
-  <p class="small muted" style="margin-top:12px">N0 预测 1（Goal 模型新目标成功率 ≤ 30%）成立；预测 2（失败中至少一半符合预定名词检索分类）未成立：78/180 = 43.3%、81/168 = 48.2%。不改变分母来修正判定。</p>
-  <p class="source">来源：<a href="#sources">[1]</a> 2026-10-18 N0 与 StarVLA 新目标表；<a href="#sources">[2]</a> §11.3。四 suite 训练可能覆盖其他相关经验；本表不能单独分离预训练、机器人数据与架构的作用。</p>
+  <div class="conclusion"><strong>Immediate result.</strong> The Goal-only models fail all five object–destination combinations. π0.5 and StarVLA complete some combinations, but their successes concentrate on different goals. Their architecture, pretraining, and robot-data coverage differ, so this table is not an isolated test of VLM quality.</div>
+  <p class="source">Sources: [1] N0 and StarVLA tables; [3] new-goal evaluation. An episode ends when the requested goal holds or the step limit is reached. Completing an intermediate goal does not end the episode.</p>
+</section>
+
+<section class="page" id="novel-meaning" aria-labelledby="novel-meaning-title">
+  <div class="page-head"><div class="eyebrow">Experiment 5 · What do the failures tell us?</div><div class="page-no">09 / 12</div></div>
+  <h2 id="novel-meaning-title">Look at which goal was completed, not just the overall score</h2>
+  <div class="table-wrap"><table><caption>Examples from the recorded outcomes. “Other goal” is a completed goal detected during a failed episode.</caption><thead><tr><th scope="col">Requested behavior</th><th scope="col">Observed behavior</th><th scope="col">Possible interpretation</th></tr></thead><tbody>
+    <tr><th scope="row">Cream cheese → cabinet top</th><td>VLA-Adapter completed bowl → cabinet top in 19/20 episodes. StarVLA did so in 16/20.</td><td>The destination is retained while the policy substitutes a familiar object–destination pairing.</td></tr>
+    <tr><th scope="row">Bowl → in front of stove</th><td>VLA-Adapter, OFT, and π0.5 completed bowl → stove in 18–20/20 episodes; StarVLA did so in 20/20.</td><td>The spatial relation “in front of” may be overridden by the familiar stove goal. Requested-goal feasibility still needs checking.</td></tr>
+    <tr><th scope="row">Open top drawer + insert cheese</th><td>Top-drawer completion was recorded in 19/20 π0.5 and 20/20 StarVLA episodes; full-task success was 0.</td><td>Completing the first subgoal does not guarantee successful composition of the full sequence.</td></tr>
+  </tbody></table></div>
+  <div class="columns">
+    <div class="labelled"><h3>Similar totals conceal different abilities</h3><p>π0.5 and StarVLA total 49/180 and 46/180. Yet cream cheese → cabinet top is <strong>90% versus 5%</strong>, while opening the top drawer is <strong>0% versus 85%</strong>. Their combination performance is strongly goal-dependent.</p><p>π0.5 opens the top drawer during the longer cheese instruction but fails the standalone drawer instruction. This suggests context dependence. Since different goal evaluations can start from different fixture layouts, a matched-state test is needed to isolate the wording effect.</p></div>
+    <div class="labelled"><h3>The predefined retrieval prediction did not pass</h3><p>The prediction was that at least half of failures would complete a familiar task sharing the requested object or destination. Using all failures as the denominator gives:</p><div class="result-line"><span>VLA-Adapter</span><strong>78/180 = 43.3%</strong></div><div class="result-line"><span>OFT</span><strong>81/168 = 48.2%</strong></div><p class="reading-note">OFT has 168 failures because 12 of 180 episodes succeeded. Drawer-only goals were not fully specified by the original classification rule. Post-hoc alternative definitions exceed 50%, but are not used to change the verdict.</p></div>
+  </div>
+  <div class="conclusion"><strong>Conclusion.</strong> Familiar-task substitution is an important observed failure pattern, but the predefined claim that it explains a majority of failures was not met. The separate prediction that Goal-only models score ≤30% on the new-goal set was met.</div>
+  <p class="source">Sources: [1] N0; [2] §11.3; user-provided outcome counts. The failure label <code>executed</code> records the first other goal held for 10 steps, not necessarily the final destination. An unclassified failure should not automatically be called retrieval or inactivity.</p>
+</section>
+
+<section class="page" id="interpretation" aria-labelledby="interpretation-title">
+  <div class="page-head"><div class="eyebrow">Interpretation · What may explain the observations?</div><div class="page-no">10 / 12</div></div>
+  <h2 id="interpretation-title">Data coverage, upstream knowledge, and transfer are separate factors</h2>
+  <p class="sub">The experiments establish behavioral effects. They motivate the following explanations, which still need controlled training comparisons.</p>
+  <div class="statement"><h3>1. Narrow data can make language distinctions unnecessary</h3><p>If similar states in the training set nearly always lead to the same action, the policy may have little incentive to use language there. Conversely, examples that share a state but require different outcomes may encourage instruction use. This is a candidate explanation for the task-dependent redirection window; we have not yet measured or manipulated those local data branches.</p></div>
+  <div class="statement"><h3>2. Upstream physical knowledge may be missing, lost, or difficult to use</h3><p>A policy that fails a new object–destination combination may lack useful spatial knowledge, may lose that knowledge during robot fine-tuning, or may preserve it without obtaining a control benefit. The current checkpoint comparisons do not distinguish these cases. “Fine-tuning erased the ability” requires measurements before and after fine-tuning.</p></div>
+  <div class="statement"><h3>3. A task can become difficult to redirect because of its physical state</h3><p>Different destinations may require different grasp poses or earlier preparatory actions. Once the robot takes an incompatible approach, a new instruction may require recovery behavior absent from the demonstrations. Failure to redirect therefore measures behavioral responsiveness; it does not prove that the network stopped processing language.</p></div>
+  <div class="sample"><div class="label">EXISTING EVIDENCE THAT TRAINING COVERAGE MATTERS</div><p>For the same OFT architecture, moving from Goal-only to four-suite training changes R_action for object-word paraphrases from <strong>0.297 to 0.454</strong> and for empty text from <strong>1.003 to 1.494</strong>. This associates training coverage with different language sensitivity. Greater sensitivity is not automatically better understanding, and the normalization denominator can also change.</p></div>
+  <div class="conclusion"><strong>The research opportunity.</strong> Test which forms of spatial or physical supervision make an upstream representation more useful for control under the same downstream robot-data budget. Language can express reusable relations, action conditions, and effects; whether learning these descriptions improves action must be measured.</div>
+  <p class="source">Sources: [1] E6 data comparison; [2] §11; research discussion. The three explanations above are hypotheses, not additional experimental findings.</p>
 </section>
 
 <section class="page" id="transfer" aria-labelledby="transfer-title">
-  <div class="page-head"><div class="eyebrow">从观察到研究问题</div><div class="page-no">07 / 08</div></div>
-  <h2 id="transfer-title">用语言表达的空间与物理知识，能否迁移到动作？</h2>
-  <p class="sub">目前的文本实验建立了行为现象；新的主线检验哪些上游能力能改善有限示范下的机器人泛化。</p>
-  <div class="flow" aria-label="计划中的上游知识迁移实验">
-    <div class="step"><div class="label">上游学习</div><strong>VLM + 空间状态问答</strong><p>由仿真真值提供位置、关系、持物与设施状态等监督。</p></div><span class="arrow" aria-hidden="true">→</span>
-    <div class="step"><div class="label">下游迁移</div><strong>相同 Goal 示范训练 VLA</strong><p>固定骨干、动作头、机器人数据与评测方式。</p></div><span class="arrow" aria-hidden="true">→</span>
-    <div class="step"><div class="label">闭环检验</div><strong>已见任务 + 新组合目标</strong><p>观察成功率、样本效率，以及上游能力是否保留。</p></div>
+  <div class="page-head"><div class="eyebrow">Next study · How will we test transfer?</div><div class="page-no">11 / 12</div></div>
+  <h2 id="transfer-title">Teach spatial knowledge, then test whether it helps action</h2>
+  <div class="labelled"><h3>Planned procedure</h3><p>Start from Qwen3-VL-4B-Instruct. Train the VLM on simulator-derived question–answer pairs, then use its VLM weights to initialize StarVLA-OFT. Train each branch with the same LIBERO-Goal demonstrations and action-head design. Finally, evaluate familiar tasks and held-out new goal combinations.</p></div>
+  <div class="table-wrap"><table class="compact"><caption>These are planned comparisons. The current materials contain no completed A/B/C/D transfer results.</caption><thead><tr><th scope="col">Branch</th><th scope="col">Extra upstream training</th><th scope="col">What its comparison tests</th></tr></thead><tbody>
+    <tr><th scope="row">A</th><td>None</td><td>Baseline VLM → VLA transfer.</td></tr>
+    <tr><th scope="row">B</th><td>Natural-language spatial/state QA</td><td>B vs A: does this supervision improve control?</td></tr>
+    <tr><th scope="row">C</th><td>Non-spatial QA on the same images</td><td>B vs C: is spatial content useful beyond extra QA training?</td></tr>
+    <tr><th scope="row">D</th><td>The same facts as B, written as JSON</td><td>B vs D: does the text format affect transfer?</td></tr>
+  </tbody></table></div>
+  <div class="sample"><div class="label">WHAT THE CURRENT QA TEACHES</div><p>Questions concern image positions, relative locations, distances, what the gripper holds, what supports an object, and drawer/stove states. For example: “What is the gripper holding?” → “The bowl,” when supported by the simulator state. The current “next step” label is a simple rule; it does not yet teach action consequences or physical explanations.</p></div>
+  <div class="grid three">
+    <div class="box"><span class="tag plan">Learned?</span><h3 style="margin-top:9px">QA training</h3><p>Does held-out QA accuracy improve? Without this improvement, the intended upstream capability has not been demonstrated.</p></div>
+    <div class="box"><span class="tag plan">Preserved?</span><h3 style="margin-top:9px">VLA fine-tuning</h3><p>Does the QA gain remain? A decline would support loss of measured capability during this training stage.</p></div>
+    <div class="box"><span class="tag plan">Useful?</span><h3 style="margin-top:9px">Robot evaluation</h3><p>Does new-goal success improve without degrading familiar tasks? Retained QA alone does not demonstrate transfer.</p></div>
   </div>
-  <div class="grid">
-    <div>
-      <h3>目前准备到哪里</h3>
-      <div class="status"><span class="tag">已完成</span><span>4 个模型的新目标基线；StarVLA 接入与分叉复现验证。</span></div>
-      <div class="status"><span class="tag">已采集</span><span>空间问答 v1：训练集 2,480 张图、留出集 592 张图；按场景划分。</span></div>
-      <div class="status"><span class="tag explore">待核查</span><span>坐标约定已确定为只翻转列；修正后的数据重建与留出集标签抽查仍需确认。</span></div>
-      <div class="status"><span class="tag plan">待结果</span><span>当前材料尚未记录 A/B/C/D 的完整训练与迁移评测结果。</span></div>
-    </div>
-    <div class="box"><h3>现有计划的主要对照</h3><div class="table-wrap"><table class="compact"><thead><tr><th scope="col">分支</th><th scope="col">VLM 上游阶段</th></tr></thead><tbody>
-      <tr><th scope="row">A</th><td>不增加问答训练</td></tr>
-      <tr><th scope="row">B</th><td>自然语言空间问答</td></tr>
-      <tr><th scope="row">C</th><td>同图像上的非空间问答</td></tr>
-      <tr><th scope="row">D</th><td>与 B 相同的事实，以 JSON 表达</td></tr>
-    </tbody></table></div><p class="small muted" style="margin-top:12px">D 检验文本表达形式；JSON 也是文本。C 的答案对图像依赖较弱，对额外视觉监督的控制仍有限。混合问答训练 A+co / B+co 作为后续分支。</p></div>
-  </div>
-  <div class="takeaway"><span class="tag plan">进一步的工作假设</span><p style="margin-top:8px">语言对“动作前提与物理后果”的监督，可能形成更容易迁移的表征。例如，同一状态执行不同动作后，物体是否被抓住、是否失去支撑。v1 主要是静态空间与状态问答，尚未验证这一假设。</p></div>
-  <p class="source">来源：<a href="#sources">[2]</a> §11 与待验证清单；<a href="#sources">[4]</a> 用户提供的问答采集输出。语言的作用是研究假设，“文本是智能根本”不作为本轮实验已证明的结论。</p>
+  <p class="compact-note"><strong>Preparation:</strong> 2,480 training and 592 held-out images, split by scene. StarVLA evaluation and restoration checks passed. Corrected coordinates and rebuilt labels still need checking. Planned main comparisons: three training seeds and 50 initial states per new goal.</p>
+  <div class="conclusion"><strong>Possible extension.</strong> If the first study warrants it, add grounded questions about what different actions would cause from the same state. Such outcomes require real or simulated evidence. Keep test combinations out of upstream training and account for any extra interaction data.</div>
+  <p class="source">Source: [2] §11 and status checklist; user-provided QA counts. C weakly controls visual learning because its answers vary little with the image. D is still text supervision. Optional QA co-training branches A+co/B+co test preservation during VLA training.</p>
 </section>
 
 <section class="page" id="discussion" aria-labelledby="discussion-title">
-  <div class="page-head"><div class="eyebrow">汇报收束 · 下一步与讨论</div><div class="page-no">08 / 08</div></div>
-  <h2 id="discussion-title">下一步建立“学会、保留、用上”的证据链</h2>
-  <div class="grid three">
-    <div class="box"><span class="tag plan">学会</span><h3 style="margin-top:10px">上游能力是否提升？</h3><p>比较原始 VLM 与问答训练后的留出场景准确率。先确认训练确实获得了目标能力。</p></div>
-    <div class="box"><span class="tag plan">保留</span><h3 style="margin-top:10px">VLA 微调后是否还在？</h3><p>再次测同类问答，区分上游没有学会和微调后能力下降。必要时检验混合训练。</p></div>
-    <div class="box"><span class="tag plan">用上</span><h3 style="margin-top:10px">闭环行为是否改善？</h3><p>在相同机器人数据下测新目标成功率，并确认已见任务没有明显退化。</p></div>
-  </div>
-  <div class="grid">
-    <div><h3>近期优先项</h3><ol class="list">
-      <li>确认 n5 / n6 / n8 的可行性，以及 QA 修正后的标签质量。</li>
-      <li>推进固定配置下的 A/B/C 对比，D 检验表达形式；主判定比较补充训练种子。</li>
-      <li>评测 OFT 四 suite 联合版，进一步约束数据覆盖的解释；仍需控制训练配方等差异。</li>
-    </ol></div>
-    <div><h3>当前结论的范围</h3><ul class="list">
-      <li>早期 E3–E6 主要为探索性结果；H1″、H3′、N0 保留预先写定规则的原判定。</li>
-      <li>行为失败尚不能证明上游知识被“学崩”，需要微调前后的测量。</li>
-      <li>问答提升、前向动作变化和闭环收益是不同层次的证据。</li>
+  <div class="page-head"><div class="eyebrow">Evidence boundaries · Discussion and references</div><div class="page-no">12 / 12</div></div>
+  <h2 id="discussion-title">What we can report now, and what remains open</h2>
+  <div class="columns">
+    <div class="labelled"><h3>Supported by the current observations</h3><ul class="list">
+      <li>Specific wording changes can alter behavior after a correct grasp.</li>
+      <li>OFT’s invented destination words match empty-text outcomes in the tested bowl states.</li>
+      <li>Mid-execution redirection depends on progress, object, and task pair.</li>
+      <li>Initial action sensitivity predicts paraphrase failures in the evaluated setting.</li>
+      <li>High familiar-task success coexists with poor or uneven new-goal performance.</li>
+    </ul></div>
+    <div class="labelled"><h3>Not yet established</h3><ul class="list">
+      <li>That all failures come from noun-based trajectory retrieval.</li>
+      <li>That stronger VLM pretraining alone explains the differences between models.</li>
+      <li>That robot fine-tuning erased previously demonstrated physical knowledge.</li>
+      <li>That spatial QA training improves downstream control.</li>
+      <li>That every zero-success new goal is feasible under the evaluation protocol.</li>
     </ul></div>
   </div>
-  <div class="takeaway"><strong>希望与导师讨论：</strong>优先检验静态空间知识的迁移，还是在第一轮结果后扩展到动作前提与后果？论文的核心应落在“哪些知识可迁移、怎样迁移”的可验证规律上。</div>
-  <div class="references" id="sources"><strong>材料来源与口径</strong><ol>
-    <li><a href="findings.md">docs/findings.md</a>：E0 / E1 / E3 / E4 / E6、H1″ / H3′、N0、StarVLA 结果；按最新补充段落整理。仓库读取版本 <code>ede1e99</code>。</li>
-    <li><a href="RESEARCH_PLAN.md">docs/RESEARCH_PLAN.md</a>：§3 判定规则、§11 迁移问题与分支、待验证清单。计划内容均与已完成结果分开呈现。</li>
-    <li><a href="DECISIONS.md">docs/DECISIONS.md</a>；<a href="../scripts/eval_goals.py">scripts/eval_goals.py</a>：新目标成功按被要求的谓词判断；失败时的 <code>executed</code> 是首先稳定满足的其他目标，不一定是最终去向。</li>
-    <li>本次对话提供的逐目标运行汇总与 QA 采集输出。HTML 由已有记录整理，未重跑模型或重新估计统计区间。</li>
-  </ol></div>
+  <div class="note"><strong>Why one earlier timing hypothesis was rejected:</strong> the original follow-up H1′ predicted continued bowl redirection at a fixed 20 steps after grasping. Both models reached 0%, triggering its refutation rule. Inspection showed that some original goals were already achieved or nearly complete at that point. The verdict was retained; H1″ was specified separately using phase-relative timing. The two batches used different scene samples and cannot be paired episode by episode.</div>
+  <div class="takeaway"><strong>Discussion with the advisor:</strong> the next decision is which upstream knowledge to prioritize: static spatial relations first, followed by action conditions and consequences if justified. The intended contribution is an evidence-based account of what knowledge transfers to control and under which training conditions.</div>
+  <div class="references" id="sources"><strong>Sources and reporting conventions</strong><ol>
+    <li><a href="findings.md">docs/findings.md</a>: experimental results, follow-up verdicts, and later corrections. Values here use the latest relevant entries; source snapshot <code>2ecf4e4</code>.</li>
+    <li><a href="RESEARCH_PLAN.md">docs/RESEARCH_PLAN.md</a>: §3 defines the follow-up predictions; §11 specifies the transfer study. “Predefined” refers to rules written before the corresponding follow-up results, called preregistrations in the project notes.</li>
+    <li><a href="DECISIONS.md">docs/DECISIONS.md</a>; <a href="../scripts/eval_goals.py">new-goal evaluator</a>; <a href="../scripts/paraphrase_invariance.py">action-sensitivity calculation</a>; <a href="../scripts/para_vs_e6.py">AUC calculation</a>. These establish implementation details, not new experimental outcomes.</li>
+    <li>User-provided per-goal summaries and QA collection output. Early E3–E6 analyses are exploratory. Most individual new-goal cells have only 20 episodes; no confidence intervals or significance tests were newly estimated for this handout.</li>
+  </ol><p>This report explains existing records. It does not add training runs, claim new measurements, or establish a complete novelty comparison with prior literature.</p></div>
 </section>
 </main>
-<footer class="footer">单文件 HTML · 无外部字体或脚本依赖 · 可离线阅读与打印 · lang-vla / 2026-10-19</footer>
+<footer class="footer">Single-file English report · Works offline · Print to a landscape PDF · lang-vla · 19 October 2026</footer>
+
 </body>
 </html>
