@@ -68,6 +68,20 @@ chmod +x "$CFG_DIR/cuda/bin/nvcc" && export CUDA_HOME=$CFG_DIR/cuda && "$CUDA_HO
 cd "$SRC"
 export PYTHONPATH=$SRC
 nvidia-smi --query-gpu=name,memory.total --format=csv
+# Rank 0 computes the LeRobot action statistics (meta/stats_gr00t.json) while the other ranks wait in a barrier
+# with NCCL's 30-min timeout; the first run hit it (49454257). Build the dataset once here, single process, so the
+# cache exists before launch (a no-op when it is already cached).
+if [ "$STAGE" = vla ]; then
+  T0=$SECONDS; python - "$LANGVLA_ROOT/configs/starvla_libero_goal.yaml" <<'PY'
+import sys
+from omegaconf import OmegaConf
+from starVLA.model.framework.share_tools import apply_config_compat
+from starVLA.dataloader.lerobot_datasets import get_vla_dataset
+cfg = apply_config_compat(OmegaConf.load(sys.argv[1]))
+print("prewarm: vla dataset length", len(get_vla_dataset(data_cfg=cfg.datasets.vla_data)), flush=True)
+PY
+  echo "dataset prewarm $((SECONDS - T0)) s"
+fi
 echo "run $RUN: $NGPU GPUs x $PER_DEV x accum $ACCUM = global batch $((NGPU * PER_DEV * ACCUM))"
 accelerate launch --config_file "$CFG_DIR/accelerate.yaml" --num_processes "$NGPU" \
   "$SCRIPT" "${ARGS[@]}" --run_id "$RUN" ${EXTRA_ARGS:-}

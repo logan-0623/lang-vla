@@ -10,6 +10,7 @@ seed: 42
 wandb_entity: none
 wandb_project: langvla_starvla
 is_debug: false
+version_id: "0.21"
 
 framework:
   name: QwenOFT
@@ -20,7 +21,8 @@ framework:
     action_dim: 7
     action_hidden_dim: 2560
     action_model_type: DiT-B
-    future_action_window_size: 7
+    action_horizon: 8                  # chunk length; train_starvlm.py skips apply_config_compat, so set it here
+    future_action_window_size: 7       # legacy alias = action_horizon - 1
     past_action_window_size: 0
 
 datasets:

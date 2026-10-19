@@ -196,3 +196,13 @@ Both training smoke tests (49427856, 49427865) died at `import deepspeed`: it ru
 only the version string is needed. First fix (pip `nvidia-cuda-nvcc-cu12`) failed: the wheel has no `bin/nvcc`
 (jobs 49436091/94). Fix: `bridges2/train_starvla.sbatch` writes a stub `nvcc` that prints torch's CUDA version
 and sets `CUDA_HOME` to it. Independent of cluster modules and wheels; DeepSpeed never compiles here.
+
+## 2026-10-19 — StarVLA config: `action_horizon`; dataset statistics before launch
+
+Smoke tests 49454256/57. (1) Stage 1 died building QwenOFT: `framework.action_model.action_horizon` missing. At
+985c223 `action_horizon` is the canonical chunk length; `train_starvla*.py` derive it from
+`future_action_window_size` via `apply_config_compat`, `train_starvlm.py` does not. The config now sets
+`action_horizon: 8` (= window 7 + 1, the released chunk) and `version_id: "0.21"`. (2) Stage 2 hit the NCCL
+30-min timeout at the first collective: rank 0 computes LeRobot statistics (`meta/stats_gr00t.json`) while the
+other ranks wait in a barrier. The job now builds the dataset once in a single process before `accelerate
+launch` and logs how long it took; cached afterwards.
