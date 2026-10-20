@@ -153,8 +153,9 @@ def fit(a) -> None:
         for pool in ("mean", "last", "grid"):
             if pool not in z:
                 continue
+            A = z[pool]                                  # npz reads the whole array on every z[...] access
             for i, layer in enumerate(z["grid_layers" if pool == "grid" else "layers"]):
-                for ln, v in probes(z[pool][:, i].astype(float), labs, tr, va, te).items():
+                for ln, v in probes(A[:, i].astype(float), labs, tr, va, te).items():
                     res[ln].setdefault(f"{name}.{pool}", {})[int(layer)] = v
             print(f"done {name}.{pool}", flush=True)
     for ln, row in res.items():
