@@ -29,9 +29,9 @@ from collections import defaultdict
 from pathlib import Path
 
 NUM = re.compile(r"-?\d+(?:\.\d+)?")
-TYPES = [("in the image", "position"), ("left or right", "side_distance"), ("How far is the gripper", "gripper_offset"),
+TYPES = [("do next", "next_step"), ("in the image", "position"), ("left or right", "side_distance"), ("How far is the gripper", "gripper_offset"),
          ("gripper holding", "held"), ("resting", "support"), ("drawer", "drawer"), ("stove turned on", "stove"),
-         ("do next", "next_step"), ("Is there a", "ctrl_presence"), ("pick up here", "ctrl_name"), ("kitchen", "ctrl_room")]
+         ("Is there a", "ctrl_presence"), ("pick up here", "ctrl_name"), ("kitchen", "ctrl_room")]
 
 
 def qtype(q: str) -> str:
@@ -128,6 +128,7 @@ def content_facts(pred: str, ref: str, kind: str) -> dict:
 def summarize(rows: list[dict]) -> dict:
     exact, content, refs = defaultdict(list), defaultdict(list), defaultdict(list)
     for x in rows:
+        x = {**x, "type": qtype(x["q"])}          # recomputed, so --rescore also fixes types saved by older runs
         exact[x["type"]].append(x["ok"])
         refs[x["type"]].append(x["ref"])
         for f, ok in content_facts(x["pred"], x["ref"], x["type"]).items():
@@ -155,7 +156,7 @@ def main() -> None:
     ap.add_argument("--rescore", default=None, help="an earlier --out dir: rescore its answers.jsonl, no model")
     ap.add_argument("--base", help="Hugging Face Qwen3-VL directory")
     ap.add_argument("--ckpt", default=None, help="StarVLA .pt; omit for the raw VLM")
-    ap.add_argument("--qa_dir", required=True)
+    ap.add_argument("--qa_dir")
     ap.add_argument("--style", default="lang", choices=["lang", "num", "ctrl"])
     ap.add_argument("--max_images", type=int, default=300)
     ap.add_argument("--out")
@@ -166,8 +167,8 @@ def main() -> None:
         prev = json.loads((d / "summary.json").read_text())
         (d / "summary.json").write_text(json.dumps({"args": prev["args"], "accuracy": summary}, indent=1))
         return report(summary)
-    if not (args.base and args.out):
-        ap.error("--base and --out are required unless --rescore")
+    if not (args.base and args.out and args.qa_dir):
+        ap.error("--base, --qa_dir and --out are required unless --rescore")
 
     import torch
     from PIL import Image

@@ -104,7 +104,16 @@ def test_eval_qa_content_facts_accept_free_phrasing():
     assert cf("Roughly 23 cm away.", "About 24 cm. The black bowl is 24 cm below the gripper.", "gripper_offset") == {"distance": True}
     assert cf("[470, 580, 520, 630]", "The black bowl is at (492, 602).", "position") == {"position": True}
     assert cf("(100, 602)", "The black bowl is at (492, 602).", "position") == {"position": False}
-    rows = [{"type": "held", "ref": "Nothing.", "pred": "Nothing.", "ok": True},
-            {"type": "held", "ref": "The plate.", "pred": "Nothing.", "ok": False}]
+    rows = [{"q": "What is the gripper holding?", "type": "held", "ref": "Nothing.", "pred": "Nothing.", "ok": True},
+            {"q": "What is the gripper holding?", "type": "held", "ref": "The plate.", "pred": "Nothing.", "ok": False}]
     s = eq.summarize(rows)
     assert s["held"]["exact"] == 0.5 and s["held"]["majority_answer"] == 0.5 and s["held.held"]["content"] == 0.5
+
+
+def test_eval_qa_next_step_type_wins_over_drawer():
+    spec = importlib.util.spec_from_file_location("eq", Path(__file__).parents[1] / "scripts/eval_qa.py")
+    eq = importlib.util.module_from_spec(spec); spec.loader.exec_module(eq)
+    assert eq.qtype("The task is: open the middle drawer of the cabinet. What should the robot do next?") == "next_step"
+    assert eq.qtype("Is the top drawer of the cabinet open?") == "drawer"
+    assert eq.content_facts("They are approximately 0.25 meters apart. The plate is to the right of the wine bottle.",
+                            "The plate is to the right of the wine bottle, about 26 cm away.", "side_distance") == {"side": True, "distance": True}
