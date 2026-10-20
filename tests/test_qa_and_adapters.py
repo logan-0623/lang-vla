@@ -117,3 +117,33 @@ def test_eval_qa_next_step_type_wins_over_drawer():
     assert eq.qtype("Is the top drawer of the cabinet open?") == "drawer"
     assert eq.content_facts("They are approximately 0.25 meters apart. The plate is to the right of the wine bottle.",
                             "The plate is to the right of the wine bottle, about 26 cm away.", "side_distance") == {"side": True, "distance": True}
+
+
+def test_eval_qa_ctrl_content():
+    spec = importlib.util.spec_from_file_location("eq", Path(__file__).parents[1] / "scripts/eval_qa.py")
+    eq = importlib.util.module_from_spec(spec); spec.loader.exec_module(eq)
+    cf = eq.content_facts
+    yes, no = "Yes, there is a black bowl in this image.", "No, there is no frying pan in this image."
+    assert eq.qtype("Is there a black bowl in this image?") == "ctrl_presence"
+    assert cf("There is no black bowl visible.", yes, "ctrl_presence") == {"presence": False}
+    assert cf("Yes, a dark bowl sits on the table.", yes, "ctrl_presence") == {"presence": True}
+    assert cf("I don't see a frying pan.", no, "ctrl_presence") == {"presence": True}
+    assert cf("It could grab the wine bottle.", "The robot could pick up the plate here.", "ctrl_name") == {"name": True}
+
+
+def test_probe_recovers_linear_signal_and_not_noise():
+    import sys
+    sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+    import probe_vlm as P
+    rng = np.random.default_rng(0)
+    n = 600
+    y_cls, y_reg = rng.integers(0, 3, n), rng.normal(size=n)
+    sig = np.c_[np.eye(3)[y_cls], y_reg]
+    X = np.c_[sig, rng.normal(size=(n, 50))] @ rng.normal(size=(54, 80))
+    scene = np.arange(n) // 10
+    te, va = scene % 5 == 4, scene % 5 == 3
+    labs = {"c": ("cls", y_cls), "r": ("reg", y_reg)}
+    good = P.probes(X, labs, ~te, va, te)
+    bad = P.probes(rng.normal(size=(n, 80)), labs, ~te, va, te)
+    assert good["c"] > 0.95 and good["r"] > 0.9
+    assert bad["c"] < 0.5 and bad["r"] < 0.1

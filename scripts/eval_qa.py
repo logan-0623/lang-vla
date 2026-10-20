@@ -67,6 +67,10 @@ def score(pred: str, ref: str, kind: str) -> bool:
     return len(pn) == len(rn) and all(close(p, r, kind) for p, r in zip(pn, rn))
 
 
+# Output-format instruction for the raw VLM (--suffix FORMAT_HINT): removes "it never gives numbers" as an excuse
+# without teaching any fact.
+FORMAT_HINT = ("Answer in one short sentence. Give image positions as (x, y) with x and y from 0 to 1000, "
+               "and distances in centimeters.")
 OBJ = ["black bowl", "cream cheese", "wine bottle", "plate"]
 CM = re.compile(r"(-?\d+(?:\.\d+)?)\s*(cm|centimet|m\b|meter|metre|mm)")
 
@@ -118,6 +122,14 @@ def content_facts(pred: str, ref: str, kind: str) -> dict:
     if kind == "gripper_offset":
         pc = _cm(p)
         return {"distance": pc is not None and close(pc, float(NUM.findall(r)[0]), "distance")}
+    if kind == "ctrl_presence":                          # recognition: "Is there a black bowl in this image?"
+        m = re.search(r"\b(yes|no)\b", p)
+        said = (m.group(1) == "yes") if m else not re.search(r"\bno\b|\bnot\b|n't", p)
+        return {"presence": said == r.startswith("yes")}
+    if kind == "ctrl_name":                              # any of the four movable objects is a correct answer
+        return {"name": any(o in p for o in OBJ)}
+    if kind == "ctrl_room":
+        return {"room": "kitchen" in p}
     if kind == "position":
         rn, pn = [float(x) for x in NUM.findall(r)], [float(x) for x in NUM.findall(p)]
         if len(pn) >= 4:
@@ -161,6 +173,33 @@ def report(summary: dict) -> None:
         print(f"{k:<24} n={v['n']:<5} {cols}")
 
 
+def load_vlm(base: str, ckpt: str | None):
+    """Hugging Face Qwen3-VL from `base`, with the VLM weights of a StarVLA checkpoint if given."""
+    import torch
+    from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+
+    model = Qwen3VLForConditionalGeneration.from_pretrained(base, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+    if ckpt:
+        if ckpt.endswith(".safetensors"):
+            from safetensors.torch import load_file
+            sd = load_file(ckpt)
+        else:
+            sd = torch.load(ckpt, map_location="cpu")
+        pre = "qwen_vl_interface.model."
+        sub = {k[len(pre):]: v for k, v in sd.items() if k.startswith(pre)}
+        missing, unexpected = model.load_state_dict(sub, strict=False)
+        print(f"loaded {len(sub)} tensors from {ckpt}; missing {len(missing)}, unexpected {len(unexpected)}")
+        if unexpected or len(missing) > 0.01 * len(sub):
+            raise SystemExit(f"checkpoint does not match {base}: missing {missing[:5]} unexpected {unexpected[:5]}")
+    return model.cuda().eval(), AutoProcessor.from_pretrained(base)
+
+
+def load_image(path, upscale: int):
+    from PIL import Image
+    img = Image.open(path).convert("RGB")
+    return img.resize((img.width * upscale, img.height * upscale), Image.BICUBIC) if upscale > 1 else img
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rescore", default=None, help="an earlier --out dir: rescore its answers.jsonl, no model")
@@ -169,6 +208,8 @@ def main() -> None:
     ap.add_argument("--qa_dir")
     ap.add_argument("--style", default="lang", choices=["lang", "num", "ctrl"])
     ap.add_argument("--max_images", type=int, default=300)
+    ap.add_argument("--suffix", default="", help="appended to every question, e.g. FORMAT_HINT")
+    ap.add_argument("--upscale", type=int, default=1, help="bicubic upscaling of the 256 px images before the VLM")
     ap.add_argument("--out")
     args = ap.parse_args()
     if args.rescore:
@@ -181,20 +222,10 @@ def main() -> None:
         ap.error("--base, --qa_dir and --out are required unless --rescore")
 
     import torch
-    from PIL import Image
-    from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
-    model = Qwen3VLForConditionalGeneration.from_pretrained(args.base, torch_dtype=torch.bfloat16, attn_implementation="sdpa")
-    if args.ckpt:
-        sd = torch.load(args.ckpt, map_location="cpu")
-        pre = "qwen_vl_interface.model."
-        sub = {k[len(pre):]: v for k, v in sd.items() if k.startswith(pre)}
-        missing, unexpected = model.load_state_dict(sub, strict=False)
-        print(f"loaded {len(sub)} tensors from {args.ckpt}; missing {len(missing)}, unexpected {len(unexpected)}")
-        if unexpected or len(missing) > 0.01 * len(sub):
-            raise SystemExit(f"checkpoint does not match {args.base}: missing {missing[:5]} unexpected {unexpected[:5]}")
-    model = model.cuda().eval()
-    proc = AutoProcessor.from_pretrained(args.base)
+    if args.suffix == "FORMAT_HINT":
+        args.suffix = FORMAT_HINT
+    model, proc = load_vlm(args.base, args.ckpt)
 
     qa_dir = Path(args.qa_dir)
     data = json.load(open(qa_dir / "llava_jsons" / f"libero_qa_{args.style}_heldout.json"))[: args.max_images]
@@ -202,11 +233,12 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=False)
     rows, saved = open(out / "answers.jsonl", "w"), []
     for item in data:
-        img = Image.open(qa_dir / item["image"]).convert("RGB")
+        img = load_image(qa_dir / item["image"], args.upscale)
         conv = item["conversations"]
         for h, g in zip(conv[::2], conv[1::2]):
             q = h["value"].replace("<image>\n", "")
-            msgs = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": q}]}]
+            text = f"{q} {args.suffix}".strip()
+            msgs = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": text}]}]
             inputs = proc.apply_chat_template(msgs, tokenize=True, add_generation_prompt=True, return_dict=True,
                                               return_tensors="pt").to(model.device)
             with torch.inference_mode():
