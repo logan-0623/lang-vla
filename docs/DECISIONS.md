@@ -212,3 +212,14 @@ Follow-up (49457808/09). Stage 1: StarVLA's VLM loader reads `video_*` fields un
 40 s (52,042 frames), yet the first barrier still timed out after 30 min, so statistics were not the cause.
 Suspect NCCL peer-to-peer on GPU-shared nodes; the job now runs `scripts/nccl_check.py` (one all-reduce, 2-min
 limit) and falls back to `NCCL_P2P_DISABLE=1`, logging which one it used.
+
+## 2026-10-19 — Held-out QA: content score next to exact score
+
+The raw Qwen3-VL-4B scored 0.000 on all 1,800 held-out `lang` questions (job 49490990) because `score()` needs our
+answer template word for word ("No." vs "No, the drawer is closed."). That exact score stays (it is the right check
+after stage-1 SFT), but it cannot measure the raw VLM, the first of the three §11 points. `eval_qa.py` now also
+reports a content score: only the fact in each answer (yes/no, held object, support, left/right with subject
+order, distances in cm/m/mm, image position or box centre), plus each type's majority-answer rate as the floor
+(most held answers are "Nothing.", most supports "the table"). Added before any trained result exists. The stop
+rule in RESEARCH_PLAN §8.3 compares content scores; next_step has no content score. Saved answers are rescored on
+the login node with `--rescore`.

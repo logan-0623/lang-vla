@@ -84,3 +84,27 @@ def test_eval_qa_scorer():
     assert s('Sure: {"cm":23,"dz_cm":-9}', '{"cm":22,"dz_cm":-10}', "gripper_offset")
     assert not s('{"open":1}', '{"open":true}', "drawer") and not s("no json", '{"open":true}', "drawer")
     assert eq.qtype("Where is the plate in the image?") == "position" and eq.qtype("Is the top drawer of the cabinet open?") == "drawer"
+
+
+def test_eval_qa_content_facts_accept_free_phrasing():
+    spec = importlib.util.spec_from_file_location("eq", Path(__file__).parents[1] / "scripts/eval_qa.py")
+    eq = importlib.util.module_from_spec(spec); spec.loader.exec_module(eq)
+    cf = eq.content_facts
+    assert cf("No, the drawer appears to be closed.", "No.", "drawer") == {"drawer": True}
+    assert cf("The top drawer is open.", "No.", "drawer") == {"drawer": False}
+    assert cf("The stove is off.", "No.", "stove") == {"stove": True}
+    assert cf("The gripper is not holding anything; it is empty.", "Nothing.", "held") == {"held": True}
+    assert cf("It is holding a black bowl.", "Nothing.", "held") == {"held": False}
+    assert cf("The robot holds the wine bottle.", "The wine bottle.", "held") == {"held": True}
+    assert cf("It sits on the wooden table.", "The plate is on the table.", "support") == {"support": True}
+    ref = "The plate is to the right of the wine bottle, about 26 cm away."
+    assert cf("The plate is on the right side of the wine bottle, roughly 0.25 m apart.", ref, "side_distance") == {"side": True, "distance": True}
+    assert cf("The wine bottle is to the left of the plate, about 60 cm.", ref, "side_distance") == {"side": True, "distance": False}
+    assert cf("The plate is left of the bottle.", ref, "side_distance") == {"side": False, "distance": False}
+    assert cf("Roughly 23 cm away.", "About 24 cm. The black bowl is 24 cm below the gripper.", "gripper_offset") == {"distance": True}
+    assert cf("[470, 580, 520, 630]", "The black bowl is at (492, 602).", "position") == {"position": True}
+    assert cf("(100, 602)", "The black bowl is at (492, 602).", "position") == {"position": False}
+    rows = [{"type": "held", "ref": "Nothing.", "pred": "Nothing.", "ok": True},
+            {"type": "held", "ref": "The plate.", "pred": "Nothing.", "ok": False}]
+    s = eq.summarize(rows)
+    assert s["held"]["exact"] == 0.5 and s["held"]["majority_answer"] == 0.5 and s["held.held"]["content"] == 0.5
