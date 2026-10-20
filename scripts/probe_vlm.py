@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from itertools import combinations
 from pathlib import Path
 
@@ -88,13 +89,19 @@ def labels(fr: list[dict]) -> dict[str, tuple[str, np.ndarray]]:
 
 
 class Ridge:
-    """Ridge for many targets and penalties from one SVD of the (standardized) training rows."""
+    """Ridge for many targets and penalties from one eigendecomposition of the smaller Gram matrix of the
+    (standardized) training rows: X'X when d <= n, XX' when d > n (the 4x4 grid has d = 16 x hidden). The Gram
+    matmul is multithreaded BLAS; an SVD of X was single-threaded LAPACK and took >1 h per model."""
 
     def __init__(self, X):
-        self.U, self.s, self.Vt = np.linalg.svd(X, full_matrices=False)
+        self.X, self.primal = X, X.shape[1] <= X.shape[0]
+        self.s2, self.E = np.linalg.eigh(X.T @ X if self.primal else X @ X.T)
+        self.s2 = np.clip(self.s2, 0, None)
 
     def coef(self, Y, alpha):
-        return self.Vt.T @ ((self.s / (self.s ** 2 + alpha))[:, None] * (self.U.T @ Y))
+        if self.primal:                                   # V diag(1/(s^2+a)) V' X'Y
+            return self.E @ ((self.E.T @ (self.X.T @ Y)) / (self.s2 + alpha)[:, None])
+        return self.X.T @ (self.E @ ((self.E.T @ Y) / (self.s2 + alpha)[:, None]))   # X'U diag(1/(s^2+a)) U'Y
 
 
 def target(kind, y):
@@ -146,6 +153,7 @@ def fit(a) -> None:
                        for f in fr])
         for ln, v in probes(px, labs, tr, va, te).items():
             res[ln]["pixels"] = v
+    t0 = time.time()
     for spec in a.feats:
         name, path = spec.split("=", 1)
         z = np.load(path)
@@ -157,7 +165,7 @@ def fit(a) -> None:
             for i, layer in enumerate(z["grid_layers" if pool == "grid" else "layers"]):
                 for ln, v in probes(A[:, i].astype(float), labs, tr, va, te).items():
                     res[ln].setdefault(f"{name}.{pool}", {})[int(layer)] = v
-            print(f"done {name}.{pool}", flush=True)
+            print(f"done {name}.{pool} at {time.time() - t0:.0f} s", flush=True)
     for ln, row in res.items():
         cols = [f"floor {row['floor']:.3f}"] + ([f"pixels {row['pixels']:.3f}"] if "pixels" in row else [])
         for k, v in row.items():
