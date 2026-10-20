@@ -108,6 +108,9 @@ def test_eval_qa_content_facts_accept_free_phrasing():
             {"q": "What is the gripper holding?", "type": "held", "ref": "The plate.", "pred": "Nothing.", "ok": False}]
     s = eq.summarize(rows)
     assert s["held"]["exact"] == 0.5 and s["held"]["majority_answer"] == 0.5 and s["held.held"]["content"] == 0.5
+    g = [{"q": "How far is the gripper from the plate?", "type": "gripper_offset", "pred": "",  "ok": False,
+          "ref": f"About {c} cm. The plate is {c} cm below the gripper."} for c in (10, 30, 31, 32)]
+    assert eq.summarize(g)["gripper_offset.distance"]["constant_answer"] == 0.75     # best constant, not a tie pick
 
 
 def test_eval_qa_next_step_type_wins_over_drawer():

@@ -150,17 +150,21 @@ def summarize(rows: list[dict]) -> dict:
     for k in sorted(exact):
         top = max(refs[k].count(v) for v in set(refs[k])) / len(refs[k])
         out[k] = {"n": len(exact[k]), "exact": sum(exact[k]) / len(exact[k]), "majority_answer": top}
-    # Fact-level floor: score the type's commonest reference answer, as a constant prediction, against every row
-    # (e.g. always "on the table" for support, always "Nothing." for held).
-    const = defaultdict(list)
-    for x in rows:
-        t = qtype(x["q"])
-        top = max(set(refs[t]), key=refs[t].count)
-        for f, ok in content_facts(top, x["ref"], t).items():
-            const[f"{t}.{f}"].append(ok)
+    # Fact-level floor: the best single reference answer of the type, given as a constant prediction to every row
+    # (e.g. always "on the table" for support, always "Nothing." for held, always "about 20 cm" for distances).
+    # The best one, not the commonest: with no dominant answer the commonest is a tie broken by set order.
+    const = {}
+    for t, rs in refs.items():
+        for cand in sorted(set(rs)):
+            sc = defaultdict(list)
+            for r in rs:
+                for f, ok in content_facts(cand, r, t).items():
+                    sc[f"{t}.{f}"].append(ok)
+            for k, v in sc.items():
+                const[k] = max(const.get(k, 0.0), sum(v) / len(v))
     for k in sorted(content):
         out.setdefault(k, {"n": len(content[k])})["content"] = sum(content[k]) / len(content[k])
-        out[k]["constant_answer"] = sum(const[k]) / len(const[k])
+        out[k]["constant_answer"] = const[k]
     allc = [v for vs in content.values() for v in vs]
     out["_all"] = {"n": len(rows), "exact": sum(x["ok"] for x in rows) / max(1, len(rows)),
                    "content": sum(allc) / max(1, len(allc))}
