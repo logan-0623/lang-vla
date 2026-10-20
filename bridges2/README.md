@@ -95,7 +95,9 @@ The QA data is generated here and trained on at DeltaAI: copy `$STORE/qa/goal-v1
 Data: `bash scripts/download_starvla_assets.sh bridges2` also fetches the LIBERO-Goal LeRobot set; QA data is
 `$STORE/qa/goal-v1` (built with `--px_convention col`).
 
-Smoke first (s/step and memory; fill §8.3 from the logged step times):
+Smoke first (s/step and memory; fill §8.3 from the logged step times). Status 2026-10-19: not passing yet on 4
+GPUs. The job writes a stub `nvcc` for DeepSpeed, prewarms the LeRobot statistics, and runs `scripts/nccl_check.py`
+(falls back to `NCCL_P2P_DISABLE=1`) before `accelerate launch`; see DECISIONS 2026-10-18/19.
 ```bash
 sbatch -t 1:00:00 --export=ALL,STAGE=vlm,QA=lang,MAX_STEPS=30,SAVE=30 bridges2/train_starvla.sbatch
 sbatch -t 1:00:00 --export=ALL,STAGE=vla,MAX_STEPS=30,SAVE=30 bridges2/train_starvla.sbatch
@@ -117,3 +119,6 @@ at the three points (raw VLM, after stage 1, after stage 2) with
 sbatch -t 3:00:00 --export=ALL,ENV=starvla bridges2/run.sbatch python scripts/eval_qa.py \
   --base $STORE/ckpt/Qwen3-VL-4B-Instruct [--ckpt <.pt>] --qa_dir $STORE/qa/goal-v1 --style lang --out $RESULTS/qa/<tag>
 ```
+It reports `exact` (our template, for trained models), `content` (the fact only, any phrasing) and the
+`constant_answer` floor. Rescore saved answers on the login node, no GPU: `python scripts/eval_qa.py --rescore $RESULTS/qa/<tag>`.
+Raw VLM: `$RESULTS/qa/raw-lang` (job 49490990, 44 min on one L40S).
