@@ -17,7 +17,8 @@ That exact score also requires our answer template, so a model never trained on 
 when right. `content_facts` therefore scores only the fact each answer carries, whatever the phrasing: yes/no,
 the held object, the support, left/right (subject order handled), distances, image position (a box counts by its
 centre). The summary reports both, plus each type's majority-answer rate (e.g. "Nothing." for most held
-questions), the accuracy of always giving the commonest answer. next_step has no content score (rule label).
+questions), the accuracy of always giving the commonest answer, and per fact `constant_answer`: the content
+score of that constant answer, the floor a model must beat. next_step has no content score (rule label).
 Rescore saved answers without a GPU: python scripts/eval_qa.py --rescore $RESULTS/qa/<tag>
 """
 from __future__ import annotations
@@ -137,8 +138,17 @@ def summarize(rows: list[dict]) -> dict:
     for k in sorted(exact):
         top = max(refs[k].count(v) for v in set(refs[k])) / len(refs[k])
         out[k] = {"n": len(exact[k]), "exact": sum(exact[k]) / len(exact[k]), "majority_answer": top}
+    # Fact-level floor: score the type's commonest reference answer, as a constant prediction, against every row
+    # (e.g. always "on the table" for support, always "Nothing." for held).
+    const = defaultdict(list)
+    for x in rows:
+        t = qtype(x["q"])
+        top = max(set(refs[t]), key=refs[t].count)
+        for f, ok in content_facts(top, x["ref"], t).items():
+            const[f"{t}.{f}"].append(ok)
     for k in sorted(content):
         out.setdefault(k, {"n": len(content[k])})["content"] = sum(content[k]) / len(content[k])
+        out[k]["constant_answer"] = sum(const[k]) / len(const[k])
     allc = [v for vs in content.values() for v in vs]
     out["_all"] = {"n": len(rows), "exact": sum(x["ok"] for x in rows) / max(1, len(rows)),
                    "content": sum(allc) / max(1, len(allc))}
@@ -147,7 +157,7 @@ def summarize(rows: list[dict]) -> dict:
 
 def report(summary: dict) -> None:
     for k, v in summary.items():
-        cols = "  ".join(f"{m}={v[m]:.3f}" for m in ("exact", "content", "majority_answer") if m in v)
+        cols = "  ".join(f"{m}={v[m]:.3f}" for m in ("exact", "content", "constant_answer", "majority_answer") if m in v)
         print(f"{k:<24} n={v['n']:<5} {cols}")
 
 
