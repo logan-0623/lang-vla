@@ -4,7 +4,9 @@ StarVLA 4in1, fine-tuned for actions from the same base): knowledge in the repre
 
   extract (GPU, ~10 min): one forward per frame of frames.jsonl with a neutral prompt ("Describe the scene."),
     hidden states of every 4th layer, mean over the image tokens and at the last token. Layer 0 is the input
-    embedding, i.e. the vision encoder's output at the image positions.
+    embedding, i.e. the vision encoder's output at the image positions. The mean is blind to where a token is, so
+    `grid` also keeps the image tokens average-pooled to a 4x4 grid (every 12th layer): without it a failed
+    position probe could just mean the pooling threw the layout away.
   fit (CPU, login node): ridge probes trained on the QA train scenes, scored on the held-out scenes (the QA split,
     scene % 5 == 4); the ridge penalty is picked on train scenes with scene % 5 == 3. Classification by argmax of a
     one-hot ridge fit (accuracy, vs the majority class); regression by R^2 (0 = predicting the train mean).
@@ -36,13 +38,14 @@ def frames(qa_dir: Path) -> list[dict]:
 
 def extract(a) -> None:
     import torch
+    import torch.nn.functional as F
     from eval_qa import load_image, load_vlm
 
     model, proc = load_vlm(a.base, a.ckpt)
     fr = frames(Path(a.qa_dir))
     img_tok = model.config.image_token_id
     layers = None
-    mean, last = [], []
+    mean, last, grid = [], [], []
     for i, f in enumerate(fr):
         img = load_image(Path(a.qa_dir) / f["image"], a.upscale)
         msgs = [{"role": "user", "content": [{"type": "image", "image": img}, {"type": "text", "text": PROMPT}]}]
@@ -54,10 +57,15 @@ def extract(a) -> None:
         is_img = inp["input_ids"][0] == img_tok
         mean.append(torch.stack([hs[l][0, is_img].float().mean(0) for l in layers]).half().cpu().numpy())
         last.append(torch.stack([hs[l][0, -1].float() for l in layers]).half().cpu().numpy())
+        _, h, w = (inp["image_grid_thw"][0] // torch.tensor([1, 2, 2], device=model.device)).tolist()  # 2x2 merge
+        assert h * w == int(is_img.sum()), (h, w, int(is_img.sum()))
+        grid.append(torch.stack([F.adaptive_avg_pool2d(hs[l][0, is_img].float().T.reshape(-1, h, w), 4).flatten()
+                                 for l in layers[::3]]).half().cpu().numpy())
         if i % 500 == 0:
             print(f"{i}/{len(fr)} frames; image tokens {int(is_img.sum())}; layers {layers}", flush=True)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    np.savez(a.out, mean=np.stack(mean), last=np.stack(last), layers=np.array(layers),
+    np.savez(a.out, mean=np.stack(mean), last=np.stack(last), layers=np.array(layers), grid=np.stack(grid),
+             grid_layers=np.array(layers[::3]),
              images=np.array([f["image"] for f in fr]), args=json.dumps(vars(a)))
     print(f"wrote {a.out}: mean {np.stack(mean).shape}")
 
@@ -129,6 +137,9 @@ def fit(a) -> None:
         labs[ln] = (kind, y)
     res = {ln: {"kind": k, "floor": float(np.bincount(y[te]).max() / te.sum()) if k == "cls" else 0.0}
            for ln, (k, y) in labs.items()}
+    for ln, (k, y) in labs.items():          # rmse = sd * sqrt(1 - R^2), in the label's units (m, or px of 256)
+        if k == "reg":
+            res[ln]["sd"] = float(np.sqrt(((y[te] - y[tr].mean(0)) ** 2).mean()))
     if a.pixels:
         from PIL import Image
         px = np.stack([np.asarray(Image.open(qa / f["image"]).convert("RGB").resize((32, 32), Image.BILINEAR), float).ravel()
@@ -139,8 +150,10 @@ def fit(a) -> None:
         name, path = spec.split("=", 1)
         z = np.load(path)
         assert list(z["images"]) == [f["image"] for f in fr], f"{path}: frames differ from {qa}/frames.jsonl"
-        for pool in ("mean", "last"):
-            for i, layer in enumerate(z["layers"]):
+        for pool in ("mean", "last", "grid"):
+            if pool not in z:
+                continue
+            for i, layer in enumerate(z["grid_layers" if pool == "grid" else "layers"]):
                 for ln, v in probes(z[pool][:, i].astype(float), labs, tr, va, te).items():
                     res[ln].setdefault(f"{name}.{pool}", {})[int(layer)] = v
             print(f"done {name}.{pool}", flush=True)
@@ -149,7 +162,8 @@ def fit(a) -> None:
         for k, v in row.items():
             if isinstance(v, dict):
                 L = max(v, key=v.get)
-                cols.append(f"{k} {v[L]:.3f}@L{L}")
+                rmse = f" rmse {row['sd'] * np.sqrt(max(0, 1 - v[L])):.3g}" if "sd" in row else ""
+                cols.append(f"{k} {v[L]:.3f}@L{L}{rmse}")
         print(f"{ln:<24} {row['kind']}  " + "  ".join(cols))
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1))

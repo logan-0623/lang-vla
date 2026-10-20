@@ -6,7 +6,7 @@
 #   qa-4in1  : the same for the VLM inside the released StarVLA 4in1 VLA (same base, fine-tuned for actions)
 #              -> what VLA fine-tuning does to the verbal QA
 #   probe    : hidden states of both models for every QA frame (scripts/probe_vlm.py extract); the probes are fit on
-#              the login node afterwards -> is the knowledge in the representation even where it is not said?
+#              the login node afterwards; also a 4x4 grid of the image tokens (D6) -> is the knowledge in the representation even where it is not said?
 #   novel-oft-joint : OFT trained on the four suites, on the nine novel goals -> cross-suite data vs pretraining
 #   git pull ; bash bridges2/batch_1019.sh
 set -euo pipefail
