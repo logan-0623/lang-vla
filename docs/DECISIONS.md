@@ -223,3 +223,21 @@ order, distances in cm/m/mm, image position or box centre), plus each type's maj
 (most held answers are "Nothing.", most supports "the table"). Added before any trained result exists. The stop
 rule in RESEARCH_PLAN §8.3 compares content scores; next_step has no content score. Saved answers are rescored on
 the login node with `--rescore`.
+
+## 2026-10-19 — QA v2: balanced answers, and a shuffled-image control in eval
+
+v1's answers are mostly predictable without the image. "No." answers 95% of drawer questions and 98% of stove
+questions, "Nothing." 78% of held questions, and "the table" about 92% of supports; the bottom drawer is never open.
+A stage-1 model could reach high held-out accuracy from these text priors alone, and that would fool the §8.3 stop
+rule. Two changes, both before any training:
+- `make_spatial_qa.py build --balance` (goal-v2, same frames and images as v1, symlinked). A candidate question
+  is kept with probability minority-frequency / its class frequency and is otherwise redrawn, so the binary facts
+  come out about even: held 54/46, support 53/47, top drawer 48/52. A fact with only one class is never asked.
+  Cost: state questions get fewer, because the data has few positives (drawer 1611 → 218 questions, stove 519 → 27,
+  support 2170 → 488), and the numeric questions (positions, distances), which priors cannot answer, make up most
+  of v2. ctrl is unchanged, so C keeps the same images and the same number of turns. The unbalanced build is
+  byte-identical to v1. `train_starvla.sbatch` now defaults to `QA_SET=goal-v2`.
+- `eval_qa.py --image_mode shuffled` gives each question an image from another held-out scene (`blank`: a gray
+  image). What a model reads from the image = its real-image score − its shuffled-image score. The stop rule
+  requires both: B stage 1 above the raw VLM, and above its own shuffled-image score.
+More state coverage (stove on, open drawers) needs new rollouts (collect); not done yet.

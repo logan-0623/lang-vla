@@ -28,6 +28,12 @@ Held-out split by scene (all frames of a scene on one side): scene % heldout_eve
 
   python scripts/make_spatial_qa.py collect --checkpoint $CKPT/LIBERO-Goal-Pro --n_scenes 50 --out $STORE/qa/goal-v1
   python scripts/make_spatial_qa.py build --dir $STORE/qa/goal-v1 --overlay 12 --px_convention col
+  python scripts/make_spatial_qa.py build --dir $STORE/qa/goal-v1 --balance --build_out $STORE/qa/goal-v2 --overlay 0
+
+Balanced builds (--balance, goal-v2): in v1 most answers are predictable without the image ("No." for 95% of
+drawer and 98% of stove questions, "Nothing." for 78% of held, "the table" for ~92% of supports). A candidate
+question is kept with probability minority-frequency / its-class-frequency and redrawn otherwise, so each binary
+fact comes out about even; facts with one class only (bottom drawer never open) are never asked.
 """
 from __future__ import annotations
 
@@ -118,8 +124,41 @@ def px_of(f: dict, convention: str) -> dict:
     return out
 
 
-def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[tuple[str, str]]:
-    """n_turns (question, answer) pairs. lang and num share questions (num adds "Answer in JSON.")."""
+def balance_key(v: dict, q: str):
+    """The (fact, answer class) a question is balanced on, or None. Binary facts with a dominant answer only."""
+    if "held" in v:
+        return ("held", v["held"] is None)
+    if "rests" in v:
+        return ("support", v["rests"] == "the table")
+    if "on" in v:
+        return ("stove", v["on"])
+    if "open" in v:
+        return (q.split()[2] + "_drawer", v["open"])           # "Is the top drawer ..." -> top_drawer
+    return None
+
+
+def balance_rates(frames: list[dict]) -> dict:
+    """Acceptance probability per (fact, class) = minority frequency / this class's frequency, so each fact's
+    answers come out about even (a class absent from the data makes its fact never asked)."""
+    cnt = {}
+    for f in frames:
+        x = f["facts"]
+        keys = [("held", x["held"] is None), ("stove", x["stove_on"])] + [(f"{d}_drawer", x["drawers"][d]) for d in DRAWERS]
+        keys += [("support", r == "the table") for r in x["rests"].values()]
+        for k in keys:
+            cnt[k] = cnt.get(k, 0) + 1
+    rates = {}
+    for fact in {k[0] for k in cnt}:
+        n = {c: cnt.get((fact, c), 0) for c in (True, False)}
+        for c in (True, False):
+            rates[(fact, c)] = min(n.values()) / n[c] if n[c] else 0.0
+    return rates
+
+
+def conversation(f: dict, rng: random.Random, style: str, n_turns: int, rates: dict | None = None) -> list[tuple[str, str]]:
+    """n_turns (question, answer) pairs. lang and num share questions (num adds "Answer in JSON.").
+    With `rates` (balance_rates), a candidate question is kept with its (fact, class) probability and redrawn
+    otherwise, so a model cannot score by always answering "No." / "Nothing." / "on the table"."""
     if style == "ctrl":
         present = list(OBJECTS.values()) + list(FIXTURES.values())
         pool = []
@@ -142,73 +181,90 @@ def conversation(f: dict, rng: random.Random, style: str, n_turns: int) -> list[
     # sits on its back knob; overlay check 2026-10-18), so fixtures appear only as supports.
     objs = every = list(OBJECTS)
     for _ in range(n_turns):
-        k = rng.randrange(7)
-        if k == 0:
-            n = rng.choice(every)
-            x, y = f["px"][n]
-            qs.append((f"Where is the {name(n)} in the image?", f"The {name(n)} is at ({x}, {y}).", {"x": x, "y": y}))
-        elif k == 1:
-            a, b = rng.sample(every, 2)
-            side = "left" if f["px"][a][0] < f["px"][b][0] else "right"
-            d = round(100 * float(np.linalg.norm(np.array(f["pos"][a][:2]) - np.array(f["pos"][b][:2]))))
-            qs.append((f"Is the {name(a)} to the left or right of the {name(b)}, and how far apart are they?",
-                       f"The {name(a)} is to the {side} of the {name(b)}, about {d} cm away.", {"side": side, "cm": d}))
-        elif k == 2:
-            n = rng.choice(objs)
-            dx, dy, dz = (100 * (np.array(f["pos"][n]) - np.array(f["eef"]))).round().astype(int).tolist()
-            d = round(float(np.linalg.norm([dx, dy, dz])))
-            vert = "below" if dz < 0 else "above"
-            qs.append((f"How far is the gripper from the {name(n)}?",
-                       f"About {d} cm. The {name(n)} is {abs(dz)} cm {vert} the gripper.", {"cm": d, "dz_cm": dz}))
-        elif k == 3:
-            h = f["held"]
-            qs.append(("What is the gripper holding?", f"The {name(h)}." if h else "Nothing.", {"held": h}))
-        elif k == 4:
-            n = rng.choice(objs)
-            r = f["rests"][n]
-            prep = "" if r == "held by the gripper" else "in " if "drawer" in r else "on "
-            ans = f"The {name(n)} is {prep}{r}."
-            qs.append((f"Where is the {name(n)} resting?", ans, {"rests": r}))
-        elif k == 5:
-            d = rng.choice(DRAWERS + ("stove",))
-            if d == "stove":
-                qs.append(("Is the stove turned on?", "Yes." if f["stove_on"] else "No.", {"on": f["stove_on"]}))
-            else:
-                qs.append((f"Is the {d} drawer of the cabinet open?", "Yes." if f["drawers"][d] else "No.", {"open": f["drawers"][d]}))
-        else:
-            t, tgt, nx = f["task"], f["target"], f["next"]
-            ans = {"done": "The task is already done.", "operate": "Move the gripper to the handle or knob and operate it.",
-                   "push": f"Put the gripper behind the {name(tgt)} and push it forward." if tgt else "",
-                   "open_drawer": "Open the top drawer first.",
-                   "transport": f"Carry the {name(tgt)} to its destination and release it." if tgt else "",
-                   "grasp": f"Move to the {name(tgt)} and grasp it." if tgt else ""}[nx]
-            qs.append((f"The task is: {t}. What should the robot do next?", ans,
-                       {"next": nx, "object": name(tgt) if nx in ("grasp", "transport", "push") else None}))
+        for _attempt in range(200):
+            n_before = len(qs)
+            _one_question(f, rng, qs, objs, every)
+            key = balance_key(qs[-1][2], qs[-1][0]) if rates else None
+            if key is None or rng.random() < rates.get(key, 1.0):
+                break
+            del qs[n_before:]
     if style == "num":
         return [(q + " Answer in JSON.", json.dumps(v, separators=(",", ":"))) for q, _, v in qs]
     return [(q, a) for q, a, _ in qs]
 
 
-def build(d: Path, convention: str, turns: int, seed: int, heldout_every: int, overlay: int) -> None:
+def _one_question(f: dict, rng: random.Random, qs: list, objs: list, every: list) -> None:
+    k = rng.randrange(7)
+    if k == 0:
+        n = rng.choice(every)
+        x, y = f["px"][n]
+        qs.append((f"Where is the {name(n)} in the image?", f"The {name(n)} is at ({x}, {y}).", {"x": x, "y": y}))
+    elif k == 1:
+        a, b = rng.sample(every, 2)
+        side = "left" if f["px"][a][0] < f["px"][b][0] else "right"
+        d = round(100 * float(np.linalg.norm(np.array(f["pos"][a][:2]) - np.array(f["pos"][b][:2]))))
+        qs.append((f"Is the {name(a)} to the left or right of the {name(b)}, and how far apart are they?",
+                   f"The {name(a)} is to the {side} of the {name(b)}, about {d} cm away.", {"side": side, "cm": d}))
+    elif k == 2:
+        n = rng.choice(objs)
+        dx, dy, dz = (100 * (np.array(f["pos"][n]) - np.array(f["eef"]))).round().astype(int).tolist()
+        d = round(float(np.linalg.norm([dx, dy, dz])))
+        vert = "below" if dz < 0 else "above"
+        qs.append((f"How far is the gripper from the {name(n)}?",
+                   f"About {d} cm. The {name(n)} is {abs(dz)} cm {vert} the gripper.", {"cm": d, "dz_cm": dz}))
+    elif k == 3:
+        h = f["held"]
+        qs.append(("What is the gripper holding?", f"The {name(h)}." if h else "Nothing.", {"held": h}))
+    elif k == 4:
+        n = rng.choice(objs)
+        r = f["rests"][n]
+        prep = "" if r == "held by the gripper" else "in " if "drawer" in r else "on "
+        ans = f"The {name(n)} is {prep}{r}."
+        qs.append((f"Where is the {name(n)} resting?", ans, {"rests": r}))
+    elif k == 5:
+        d = rng.choice(DRAWERS + ("stove",))
+        if d == "stove":
+            qs.append(("Is the stove turned on?", "Yes." if f["stove_on"] else "No.", {"on": f["stove_on"]}))
+        else:
+            qs.append((f"Is the {d} drawer of the cabinet open?", "Yes." if f["drawers"][d] else "No.", {"open": f["drawers"][d]}))
+    else:
+        t, tgt, nx = f["task"], f["target"], f["next"]
+        ans = {"done": "The task is already done.", "operate": "Move the gripper to the handle or knob and operate it.",
+               "push": f"Put the gripper behind the {name(tgt)} and push it forward." if tgt else "",
+               "open_drawer": "Open the top drawer first.",
+               "transport": f"Carry the {name(tgt)} to its destination and release it." if tgt else "",
+               "grasp": f"Move to the {name(tgt)} and grasp it." if tgt else ""}[nx]
+        qs.append((f"The task is: {t}. What should the robot do next?", ans,
+                   {"next": nx, "object": name(tgt) if nx in ("grasp", "transport", "push") else None}))
+
+
+def build(d: Path, convention: str, turns: int, seed: int, heldout_every: int, overlay: int,
+          balance: bool = False, out: Path | None = None) -> None:
     frames = [json.loads(l) for l in open(d / "frames.jsonl")]
-    (d / "llava_jsons").mkdir(exist_ok=True)
+    rates = balance_rates(frames) if balance else None
+    out = out or d                             # a balanced build can go to its own dir; images stay in d
+    (out / "llava_jsons").mkdir(parents=True, exist_ok=True)
+    for shared in ("images", "frames.jsonl"):  # llava jsons and eval/probe scripts resolve these under the QA dir
+        if out != d and not (out / shared).exists():
+            (out / shared).symlink_to((d / shared).resolve())
     for style in ("lang", "num", "ctrl"):
         rng = random.Random(seed)              # same seed per style: lang and num ask the same questions
         split = {"train": [], "heldout": []}
         for f in frames:
             fx = {**f["facts"], "px": px_of(f["facts"], convention)}
             conv = []
-            for i, (q, a) in enumerate(conversation(fx, rng, style, turns)):
+            for i, (q, a) in enumerate(conversation(fx, rng, style, turns, rates)):
                 conv += [{"from": "human", "value": ("<image>\n" if i == 0 else "") + q}, {"from": "gpt", "value": a}]
             side = "heldout" if f["scene"] % heldout_every == heldout_every - 1 else "train"
             split[side].append({"image": f["image"], "conversations": conv, "task_id": f["task_id"], "scene": f["scene"]})
         for side, data in split.items():
             suffix = "" if side == "train" else "_heldout"
-            (d / "llava_jsons" / f"libero_qa_{style}{suffix}.json").write_text(json.dumps(data))
+            (out / "llava_jsons" / f"libero_qa_{style}{suffix}.json").write_text(json.dumps(data))
         n_chars = sum(len(t["value"]) for t in [x for v in split.values() for e in v for x in e["conversations"]] if t["from"] == "gpt")
         print(f"{style}: {len(split['train'])} train / {len(split['heldout'])} held-out images, answer chars {n_chars}")
-    (d / "build_config.json").write_text(json.dumps({"px_convention": convention, "turns": turns, "seed": seed,
-                                                     "heldout_every": heldout_every}, indent=2))
+    (out / "build_config.json").write_text(json.dumps({"px_convention": convention, "turns": turns, "seed": seed,
+                                                       "heldout_every": heldout_every, "balance": balance,
+                                                       "frames_dir": str(d)}, indent=2))
     if overlay:
         from PIL import Image, ImageDraw
         (d / "overlay").mkdir(exist_ok=True)
@@ -237,6 +293,8 @@ def main() -> None:
     c.add_argument("--every", type=int, default=20, help="env steps between sampled frames")
     b = sub.add_parser("build")
     b.add_argument("--dir", required=True)
+    b.add_argument("--balance", action="store_true", help="even answers per binary fact (balance_rates)")
+    b.add_argument("--build_out", default=None, help="write the jsons here (images, frames.jsonl symlinked)")
     for a in (c, b):
         a.add_argument("--turns", type=int, default=6, help="QA turns per image")
         a.add_argument("--seed", type=int, default=7)
@@ -245,7 +303,8 @@ def main() -> None:
         a.add_argument("--overlay", type=int, default=12)
     args = ap.parse_args()
     if args.cmd == "build":
-        build(Path(args.dir), args.px_convention, args.turns, args.seed, args.heldout_every, args.overlay)
+        build(Path(args.dir), args.px_convention, args.turns, args.seed, args.heldout_every, args.overlay,
+              args.balance, Path(args.build_out) if args.build_out else None)
         return
     collect(args)
     build(Path(args.out), args.px_convention, args.turns, args.seed, args.heldout_every, args.overlay)

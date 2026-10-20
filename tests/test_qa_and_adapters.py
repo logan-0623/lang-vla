@@ -147,3 +147,19 @@ def test_probe_recovers_linear_signal_and_not_noise():
     bad = P.probes(rng.normal(size=(n, 80)), labs, ~te, va, te)
     assert good["c"] > 0.95 and good["r"] > 0.9
     assert bad["c"] < 0.5 and bad["r"] < 0.1
+
+
+def test_balanced_build_evens_held_answers():
+    held_f = {**FACTS}
+    empty_f = {**FACTS, "held": None, "rests": {n: "the table" for n in qa.OBJECTS}}
+    frames = [{"facts": held_f}] * 20 + [{"facts": empty_f}] * 80          # 80% "Nothing."
+    rates = qa.balance_rates(frames)
+    assert abs(rates[("held", True)] - 0.25) < 1e-9 and rates[("held", False)] == 1.0
+    assert rates[("top_drawer", False)] == 0.0                            # top drawer never open: never asked
+    rng, held = random.Random(0), []
+    for f in frames * 10:
+        for q, a in qa.conversation(f["facts"], rng, "lang", 6, rates):
+            assert "top drawer" not in q
+            if q == "What is the gripper holding?":
+                held.append(a == "Nothing.")
+    assert 0.4 < np.mean(held) < 0.6

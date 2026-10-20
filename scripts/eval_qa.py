@@ -210,6 +210,9 @@ def main() -> None:
     ap.add_argument("--max_images", type=int, default=300)
     ap.add_argument("--suffix", default="", help="appended to every question, e.g. FORMAT_HINT")
     ap.add_argument("--upscale", type=int, default=1, help="bicubic upscaling of the 256 px images before the VLM")
+    ap.add_argument("--image_mode", default="real", choices=["real", "shuffled", "blank"],
+                    help="shuffled: each question gets the image of another held-out scene; blank: a gray image. "
+                         "The score without the right image is what the text prior alone gets.")
     ap.add_argument("--out")
     args = ap.parse_args()
     if args.rescore:
@@ -232,8 +235,15 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=False)
     rows, saved = open(out / "answers.jsonl", "w"), []
-    for item in data:
-        img = load_image(qa_dir / item["image"], args.upscale)
+    from PIL import Image
+    for j, item in enumerate(data):
+        if args.image_mode == "shuffled":           # half the list away: a different scene, same distribution
+            src = next(x for x in data[(j + len(data) // 2):] + data if x["scene"] != item["scene"])
+            img = load_image(qa_dir / src["image"], args.upscale)
+        elif args.image_mode == "blank":
+            img = Image.new("RGB", (256 * args.upscale,) * 2, (128, 128, 128))
+        else:
+            img = load_image(qa_dir / item["image"], args.upscale)
         conv = item["conversations"]
         for h, g in zip(conv[::2], conv[1::2]):
             q = h["value"].replace("<image>\n", "")

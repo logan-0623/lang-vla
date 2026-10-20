@@ -20,7 +20,7 @@ set -euo pipefail
 source "${LANGVLA_ROOT:-$SLURM_SUBMIT_DIR}/bridges2/config.sh"
 conda activate "$STORE/envs/starvla"
 SRC=$STORE/src/starVLA
-export LANGVLA_QA_ROOT=$STORE/qa/${QA_SET:-goal-v1}
+export LANGVLA_QA_ROOT=$STORE/qa/${QA_SET:-goal-v2}    # balanced answers (DECISIONS 2026-10-19)
 STAGE=${STAGE:?vlm or vla}
 NGPU=$(nvidia-smi -L | wc -l)
 PER_DEV=${PER_DEV:-8}
