@@ -209,7 +209,7 @@ def test_action_eraser_leaves_no_linear_covariance(tmp_path):
     json.dump({"shape": [T, H]}, open(tmp_path / "rec.f16.json", "w"))
     with open(tmp_path / "rec.jsonl", "w") as f:
         for i in range(n):
-            f.write(json.dumps({"episode": i // 10, "robot0_eef_pos": pos[i, 0].tolist(),
+            f.write(json.dumps({"episode": i // 10, "robot0_eef_pos": pos[i, 0].tolist(), "robot0_gripper_qpos": [0, 0],
                                 **{f"{o}_pos": pos[i, j + 1].tolist() for j, o in enumerate(ea.OBJ)}}) + "\n")
     X, ep, Z = ea.load(str(tmp_path / "rec.f16"), str(tmp_path / "rec.jsonl"))
     z = Z["geom"]
@@ -219,4 +219,5 @@ def test_action_eraser_leaves_no_linear_covariance(tmp_path):
     te = ep % 5 == 4
     assert ea.r2(X[~te], z[~te], X[te], z[te]) > 0.95
     assert ea.r2(*(lambda Xe: (Xe[~te], z[~te], Xe[te], z[te]))(ea.apply(X, X.mean(0), U))) < 0.05
-    assert R[0].shape == U.shape
+    assert R[0].shape == U.shape and np.abs(np.einsum("thk,thj->tkj", U, R[0])).max() < 0.3
+    assert ea.knn_r2(X[~te], z[~te], X[te], z[te]) > 0.5

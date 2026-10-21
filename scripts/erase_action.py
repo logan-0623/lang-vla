@@ -9,11 +9,13 @@ with the concept erased vs a random subspace of the same rank.
            labels with LV_LABELS, in the same call order.
   fit    : erasers from a recorded run. Per action-token position t, U_t = orthonormal basis of the cross-covariance
            Cov(x_t, z); x_t <- x_t - U_t U_t^T (x_t - mu_t) leaves no linear covariance with z (so no linear probe,
-           on one token or all of them concatenated, beats the mean). Random control: U_t from random combinations
-           of the centred records (covariance-weighted directions, same rank). Concepts:
+           on one token or all of them concatenated, beats the mean). Random control: variance-matched principal
+           directions not aligned with the concept (`matched`), same rank. Concepts:
+             eef  : gripper xyz (rank 3; OFT gets no proprio, so it must come from the images)
              dist : |eef - object| for the 4 movable objects (rank 4; the quantity of the counter-heuristic test)
              geom : eef xyz and eef - object vectors (rank 15)
-           Prints held-out-episode R^2 before / after each eraser and the fraction of ||x - mu|| it removes.
+             grip : finger opening (rank 1; action-relevant but not a spatial relation)
+           Prints held-out-episode R^2 (linear and kNN) before / after each eraser and the fraction of ||x - mu|| removed.
 
   sbatch --export=ALL,SV_CKPT=...,SV_WRAP=$PWD/scripts/erase_action.py,LV_RECORD=$P/rec.f16,LV_LABELS=$P/rec.jsonl \
     bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --sets seen ...
@@ -30,7 +32,7 @@ import sys
 import numpy as np
 
 OBJ = ["akita_black_bowl_1", "cream_cheese_1", "wine_bottle_1", "plate_1"]
-CONCEPTS = ("dist", "geom")
+CONCEPTS = ("eef", "dist", "geom", "grip")
 N_RANDOM = 2
 ALPHAS = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5]
 
@@ -75,7 +77,9 @@ def load(rec: str, labels: str) -> tuple[np.ndarray, np.ndarray, dict[str, np.nd
     assert len(L) == len(X), f"{len(X)} server records vs {len(L)} label lines: not the same run?"
     eef = np.array([l["robot0_eef_pos"] for l in L])
     rel = np.stack([np.array([l[f"{o}_pos"] for l in L]) - eef for o in OBJ], 1)          # [n, 4, 3]
-    Z = {"dist": np.linalg.norm(rel, axis=2), "geom": np.concatenate([eef, rel.reshape(len(L), -1)], 1)}
+    grip = np.array([l["robot0_gripper_qpos"] for l in L])
+    Z = {"eef": eef, "dist": np.linalg.norm(rel, axis=2), "geom": np.concatenate([eef, rel.reshape(len(L), -1)], 1),
+         "grip": (grip[:, :1] - grip[:, 1:2])}                                               # finger opening
     return X, np.array([l["episode"] for l in L]), Z
 
 
@@ -84,10 +88,24 @@ def basis(C: np.ndarray) -> np.ndarray:
     return np.stack([np.linalg.qr(c)[0] for c in C])
 
 
+def matched(Xc: np.ndarray, U: np.ndarray, rng) -> np.ndarray:
+    """Random control for one token position: for each concept direction, a principal direction of the records with
+    nearly the same variance (one of the 5 nearest in log variance) that is not aligned with the concept subspace
+    (|cos| < 0.3 to every concept direction). Same rank and about the same removed variance as the concept eraser."""
+    _, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+    lv = np.log(S ** 2 / len(Xc) + 1e-12)
+    ok = np.abs(Vt @ U).max(1) < 0.3
+    pick = []
+    for v in np.log(((Xc @ U) ** 2).mean(0) + 1e-12):
+        cand = [j for j in np.argsort(np.abs(lv - v)) if ok[j] and j not in pick][:5]
+        pick.append(int(rng.choice(cand)))
+    return Vt[pick].T
+
+
 def erasers(X: np.ndarray, z: np.ndarray, rng) -> tuple[np.ndarray, list[np.ndarray]]:
     Xc, zc = X - X.mean(0), z - z.mean(0)
     U = basis(np.einsum("nth,nk->thk", Xc, zc) / len(X))
-    R = [basis(np.einsum("nth,nk->thk", Xc, rng.standard_normal(zc.shape))) for _ in range(N_RANDOM)]
+    R = [np.stack([matched(Xc[:, t], U[t], rng) for t in range(U.shape[0])]) for _ in range(N_RANDOM)]
     return U, R
 
 
@@ -111,6 +129,15 @@ def r2(Xtr, ztr, Xte, zte) -> float:
     return best
 
 
+def knn_r2(Xtr, ztr, Xte, zte, k=10) -> float:
+    """Nonlinear check: k-nearest-neighbour regression on the concatenated tokens. Linear erasure leaves nonlinear
+    information; a high value here means the action head could still recover the concept."""
+    A, B = Xtr.reshape(len(Xtr), -1), Xte.reshape(len(Xte), -1)
+    d = (B ** 2).sum(1)[:, None] - 2 * B @ A.T + (A ** 2).sum(1)[None]
+    pred = ztr[np.argsort(d, 1)[:, :k]].mean(1)
+    return float(1 - ((pred - zte) ** 2).sum() / ((zte - ztr.mean(0)) ** 2).sum())
+
+
 def fit(a) -> None:
     X, ep, Z = load(a.rec, a.labels)
     rng = np.random.default_rng(a.seed)
@@ -122,11 +149,13 @@ def fit(a) -> None:
         z = Z[c]
         U, R = erasers(X[~te], z[~te], rng)                     # check: erasers from train episodes only
         mtr = X[~te].mean(0)
-        line = f"{c:<5} rank {z.shape[1]:>2}  R2 held-out: none {r2(X[~te], z[~te], X[te], z[te]):.3f}"
+        line = (f"{c:<5} rank {z.shape[1]:>2}  held-out R2 linear/kNN: none {r2(X[~te], z[~te], X[te], z[te]):.3f}/"
+                f"{knn_r2(X[~te], z[~te], X[te], z[te]):.3f}")
         for nm, V in [("concept", U)] + [(f"random{i}", V) for i, V in enumerate(R)]:
             Xe = apply(X, mtr, V)
             frac = np.linalg.norm(X - Xe, axis=2).mean() / np.linalg.norm(X - mtr, axis=2).mean()
-            line += f" | {nm} {r2(Xe[~te], z[~te], Xe[te], z[te]):.3f} (removes {frac:.3f} of |x-mu|)"
+            line += (f" | {nm} {r2(Xe[~te], z[~te], Xe[te], z[te]):.3f}/{knn_r2(Xe[~te], z[~te], Xe[te], z[te]):.3f}"
+                     f" (removes {frac:.3f} of |x-mu|)")
         print(line, flush=True)
         U, R = erasers(X, z, rng)                               # served erasers: all episodes
         out[f"{c}.U"] = U.astype(np.float32)
