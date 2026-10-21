@@ -148,8 +148,8 @@ def test_probe_recovers_linear_signal_and_not_noise():
     labs = {"c": ("cls", y_cls), "r": ("reg", y_reg)}
     good = P.probes(X, labs, ~te, va, te)
     bad = P.probes(rng.normal(size=(n, 80)), labs, ~te, va, te)
-    assert good["c"] > 0.95 and good["r"] > 0.9
-    assert bad["c"] < 0.5 and bad["r"] < 0.1
+    assert good["c"][1] > 0.95 and good["r"][1] > 0.9
+    assert bad["c"][1] < 0.5 and bad["r"][1] < 0.1
 
 
 def test_balanced_build_evens_held_answers():

@@ -8,7 +8,7 @@ StarVLA 4in1, fine-tuned for actions from the same base): knowledge in the repre
     `grid` also keeps the image tokens average-pooled to a 4x4 grid (every 12th layer): without it a failed
     position probe could just mean the pooling threw the layout away.
   fit (CPU, login node): ridge probes trained on the QA train scenes, scored on the held-out scenes (the QA split,
-    scene % 5 == 4); the ridge penalty is picked on train scenes with scene % 5 == 3. Classification by argmax of a
+    scene % 5 == 4); the ridge penalty and the reported layer are picked on train scenes with scene % 5 == 3. Classification by argmax of a
     one-hot ridge fit (accuracy, vs the majority class); regression by R^2 (0 = predicting the train mean).
     `--pixels` adds a probe on the 32x32 downsampled image, the floor for "it is in the pixels anyway".
 
@@ -115,8 +115,8 @@ def score(kind, P, y, Ytr_mean):
     return float(1 - ((P - Y) ** 2).sum() / ((Y - Ytr_mean) ** 2).sum())
 
 
-def probes(X, labs, tr, va, te) -> dict[str, float]:
-    """Held-out score of a ridge probe per label; penalty chosen on `va` (a subset of `tr`)."""
+def probes(X, labs, tr, va, te) -> dict[str, tuple[float, float]]:
+    """(validation, held-out) score of a ridge probe per label; penalty chosen on `va` (a subset of `tr`)."""
     mu, sd = X[tr].mean(0), X[tr].std(0) + 1e-6
     X = (X - mu) / sd
     fit_tr = tr & ~va
@@ -125,8 +125,9 @@ def probes(X, labs, tr, va, te) -> dict[str, float]:
     for ln, (kind, y) in labs.items():
         Y = target(kind, y)
         m_fit, m_all = Y[fit_tr].mean(0), Y[tr].mean(0)        # centring stands in for the intercept
-        best = max(ALPHAS, key=lambda al: score(kind, X[va] @ r_fit.coef(Y[fit_tr] - m_fit, al) + m_fit, y[va], m_fit))
-        out[ln] = score(kind, X[te] @ r_all.coef(Y[tr] - m_all, best) + m_all, y[te], m_all)
+        vs = {al: score(kind, X[va] @ r_fit.coef(Y[fit_tr] - m_fit, al) + m_fit, y[va], m_fit) for al in ALPHAS}
+        best = max(vs, key=vs.get)
+        out[ln] = (vs[best], score(kind, X[te] @ r_all.coef(Y[tr] - m_all, best) + m_all, y[te], m_all))
     return out
 
 
@@ -152,7 +153,7 @@ def fit(a) -> None:
         px = np.stack([np.asarray(Image.open(qa / f["image"]).convert("RGB").resize((32, 32), Image.BILINEAR), float).ravel()
                        for f in fr])
         for ln, v in probes(px, labs, tr, va, te).items():
-            res[ln]["pixels"] = v
+            res[ln]["pixels"] = v[1]
     t0 = time.time()
     for spec in a.feats:
         name, path = spec.split("=", 1)
@@ -164,15 +165,15 @@ def fit(a) -> None:
             A = z[pool]                                  # npz reads the whole array on every z[...] access
             for i, layer in enumerate(z["grid_layers" if pool == "grid" else "layers"]):
                 for ln, v in probes(A[:, i].astype(float), labs, tr, va, te).items():
-                    res[ln].setdefault(f"{name}.{pool}", {})[int(layer)] = v
+                    res[ln].setdefault(f"{name}.{pool}", {})[int(layer)] = v       # (validation, held-out)
             print(f"done {name}.{pool} at {time.time() - t0:.0f} s", flush=True)
     for ln, row in res.items():
         cols = [f"floor {row['floor']:.3f}"] + ([f"pixels {row['pixels']:.3f}"] if "pixels" in row else [])
         for k, v in row.items():
             if isinstance(v, dict):
-                L = max(v, key=v.get)
-                rmse = f" rmse {row['sd'] * np.sqrt(max(0, 1 - v[L])):.3g}" if "sd" in row else ""
-                cols.append(f"{k} {v[L]:.3f}@L{L}{rmse}")
+                L = max(v, key=lambda l: v[l][0])          # layer picked on validation scenes, scored held-out
+                rmse = f" rmse {row['sd'] * np.sqrt(max(0, 1 - v[L][1])):.3g}" if "sd" in row else ""
+                cols.append(f"{k} {v[L][1]:.3f}@L{L}{rmse}")
         print(f"{ln:<24} {row['kind']}  " + "  ".join(cols))
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1))
