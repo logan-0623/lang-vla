@@ -301,8 +301,14 @@ def swap_groups(L: list[dict], names: dict[str, str]) -> list[dict[str, int]]:
 
 
 def top_basis(D: np.ndarray, k: int) -> np.ndarray:
-    """D [n, chunk, H] -> per token position the top-k left singular directions, [chunk, H, k]."""
-    return np.stack([np.linalg.svd(D[:, t].T, full_matrices=False)[0][:, :k] for t in range(D.shape[1])])
+    """D [n, chunk, H] -> per token position the top-k left singular directions, [chunk, H, k] (eigenvectors of the
+    H x H Gram matrix: the same directions as the SVD, without computing all n right singular vectors)."""
+    out = []
+    for t in range(D.shape[1]):
+        A = D[:, t].astype(np.float64)
+        w, V = np.linalg.eigh(A.T @ A)
+        out.append(V[:, ::-1][:, :k])
+    return np.stack(out)
 
 
 def subspaces(a) -> None:
