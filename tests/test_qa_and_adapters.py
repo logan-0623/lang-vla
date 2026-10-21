@@ -178,7 +178,7 @@ def test_counter_pairs_groups_order_and_qa(tmp_path):
     assert C.group({**ray, "dist3d": 0.06}) == "consistent" and C.group({**ray, "dist3d": 0.25}) == "counter"
     assert C.group({**ray, "dist3d": 0.14}) is None and C.group({**ray, "dist3d": 0.25, "px2d": 40}) is None
     assert C.group({**ray, "dist3d": 0.06, "reach_err": 0.05}) is None
-    assert C.group({"kind": "grip", "reach_err": 0.0, "held": False}) == "counter"
+    assert C.group({"kind": "grip", "reach_err": 0.05, "held": False}) == "counter"      # blocked descent is fine
     parent, true = np.array([0, 0, 0, 1, 1, 1]), np.array([.06, .12, .19, .06, .12, .19])
     assert C.pair_order(parent, true, true * 2) == 1.0 and C.pair_order(parent, true, -true) == 0.0
     assert C.pair_order(parent, true, np.zeros(6)) == 0.0          # ties are not "ordered"

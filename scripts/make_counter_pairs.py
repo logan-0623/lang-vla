@@ -176,11 +176,11 @@ def overlay(out: Path, frames: list[dict]) -> None:
 # ------------------------------------------------------------------ analysis (CPU)
 
 def group(cf: dict) -> str | None:
-    """consistent / counter (cue agrees / disagrees with the truth), or None (in between, or the arm missed)."""
-    if cf["reach_err"] > 0.02:
-        return None
+    """consistent / counter (cue agrees / disagrees with the truth), or None (in between, or the arm missed).
+    The reach check is for ray only: a grip's descent is meant to be stopped by the object or the table, and its
+    label (held or not) is read back anyway (changed 2026-10-20 after the collection stats, before any result)."""
     if cf["kind"] == "ray":
-        if cf["px2d"] > OVER_PX:
+        if cf["reach_err"] > 0.02 or cf["px2d"] > OVER_PX:
             return None
         return "consistent" if cf["dist3d"] <= NEAR else "counter" if cf["dist3d"] >= FAR else None
     return "consistent" if cf["held"] else "counter"
