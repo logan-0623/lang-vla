@@ -17,6 +17,14 @@ import numpy as np
 
 LIBERO_ENV_RESOLUTION = 256
 IMAGE_SIZE = (224, 224)
+SWAP_EVERY = 10
+
+
+def _all_goal_languages() -> list[str]:
+    from pathlib import Path
+    from langeval.goal_predicates import load_goals, load_novel_goals
+    novel = Path(__file__).parents[2] / "configs/novel_goals.json"
+    return [g.language for g in load_goals("libero_goal") + load_novel_goals(str(novel))]
 
 
 def _resize(img: np.ndarray) -> np.ndarray:
@@ -41,23 +49,36 @@ class StarVLAPolicy:
         self.deterministic = True     # OFT head, do_sample=False; checked at run time by orig vs orig_rep
         # LV_LABELS: one json line of the observation's *pos entries (positions, gripper qpos) per server call, in
         # call order, so that the server-side record of scripts/erase_action.py (same order) can be labelled.
+        # LV_SWAP (with LV_LABELS): every SWAP_EVERY-th call of an episode, the same observation is also sent with
+        # each other LIBERO-Goal / novel instruction (answers only recorded, never executed; RESEARCH_PLAN §11.7).
         import os
         self.labels = open(os.environ["LV_LABELS"], "a") if os.environ.get("LV_LABELS") else None
-        self.episode = -1
+        self.swap = _all_goal_languages() if self.labels and os.environ.get("LV_SWAP") else []
+        self.episode, self.call = -1, 0
 
     def begin(self) -> None:
-        self.episode += 1
+        self.episode, self.call = self.episode + 1, 0
+
+    def _query(self, imgs: list, lang: str) -> np.ndarray:
+        resp = self.client.predict_action({"examples": [{"image": imgs, "lang": lang}],
+                                           "unnorm_key": self.unnorm_key, "do_sample": False,
+                                           "use_ddim": True, "num_ddim_steps": 10})
+        return np.asarray(resp["data"]["actions"])[0][: self.chunk]
 
     def act(self, obs: dict, instruction: str) -> list[np.ndarray]:
         imgs = [_resize(np.ascontiguousarray(obs[k][::-1, ::-1])) for k in ("agentview_image", "robot0_eye_in_hand_image")]
-        resp = self.client.predict_action({"examples": [{"image": imgs, "lang": instruction}],
-                                           "unnorm_key": self.unnorm_key, "do_sample": False,
-                                           "use_ddim": True, "num_ddim_steps": 10})
+        chunk = self._query(imgs, instruction)
         if self.labels:
-            self.labels.write(json.dumps({"episode": self.episode, "lang": instruction,
-                                          **{k: np.asarray(v).tolist() for k, v in obs.items() if k.endswith("pos")}}) + "\n")
+            pos = {k: np.asarray(v).tolist() for k, v in obs.items() if k.endswith("pos")}
+            rec = {"episode": self.episode, "call": self.call, "lang": instruction, "action": chunk.tolist(), **pos}
+            self.labels.write(json.dumps(rec) + "\n")
+            if self.call % SWAP_EVERY == 0:
+                for alt in self.swap:
+                    if alt != instruction:
+                        self.labels.write(json.dumps({**rec, "lang": alt, "swap_of": instruction,
+                                                      "action": self._query(imgs, alt).tolist()}) + "\n")
             self.labels.flush()
-        chunk = np.asarray(resp["data"]["actions"])[0][: self.chunk]
+        self.call += 1
         out = []
         for a in chunk:
             g = 1.0 - 2.0 * float(a[6] > 0.5)

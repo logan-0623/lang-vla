@@ -19,7 +19,11 @@ with the concept erased vs a random subspace of the same rank.
 
   sbatch --export=ALL,SV_CKPT=...,SV_WRAP=$PWD/scripts/erase_action.py,LV_RECORD=$P/rec.f16,LV_LABELS=$P/rec.jsonl \
     bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --sets seen ...
-  python scripts/erase_action.py fit --rec $P/rec.f16 --labels $P/rec.jsonl --out $P/erasers.npz
+  python scripts/erase_action.py fit --rec $P/rec.f16 --labels $P/rec.jsonl --run_config $P/none/run_config.json --out $P/erasers.npz
+  binding : (RESEARCH_PLAN §11.7) with LV_SWAP, the recorded run also sent every 10th observation with all 19
+           instructions; for each novel instruction, the nearest seen goal at the action-head input / in the actions,
+           vs the goal its failed episodes executed.
+  python scripts/erase_action.py binding --rec $P/rec.f16 --labels $P/rec.jsonl --run_dir $P/none
 """
 from __future__ import annotations
 
@@ -70,7 +74,7 @@ def serve(argv: list[str]) -> None:
     runpy.run_path(argv[0], run_name="__main__")
 
 
-def load(rec: str, labels: str) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+def load(rec: str, labels: str) -> tuple[np.ndarray, list[dict], dict[str, np.ndarray]]:
     shape = json.load(open(rec + ".json"))["shape"]
     X = np.fromfile(rec, np.float16).reshape(-1, *shape).astype(np.float32)
     L = [json.loads(l) for l in open(labels)]
@@ -80,7 +84,7 @@ def load(rec: str, labels: str) -> tuple[np.ndarray, np.ndarray, dict[str, np.nd
     grip = np.array([l["robot0_gripper_qpos"] for l in L])
     Z = {"eef": eef, "dist": np.linalg.norm(rel, axis=2), "geom": np.concatenate([eef, rel.reshape(len(L), -1)], 1),
          "grip": (grip[:, :1] - grip[:, 1:2])}                                               # finger opening
-    return X, np.array([l["episode"] for l in L]), Z
+    return X, L, Z
 
 
 def basis(C: np.ndarray) -> np.ndarray:
@@ -139,7 +143,11 @@ def knn_r2(Xtr, ztr, Xte, zte, k=10) -> float:
 
 
 def fit(a) -> None:
-    X, ep, Z = load(a.rec, a.labels)
+    X, L, Z = load(a.rec, a.labels)
+    cfg = json.load(open(a.run_config))
+    seen = {l for l, n in zip(cfg["goal_language"], cfg["goal_names"]) if n.startswith("s")}
+    keep = np.array(["swap_of" not in l and l["lang"] in seen for l in L])       # executed calls, seen goals only
+    X, ep, Z = X[keep], np.array([l["episode"] for l in L])[keep], {c: z[keep] for c, z in Z.items()}
     rng = np.random.default_rng(a.seed)
     te = ep % 5 == 4                                            # readability check: held-out episodes
     mu = X.mean(0)
@@ -165,6 +173,54 @@ def fit(a) -> None:
     print(f"wrote {a.out}: {sorted(k for k in out if k != 'mu')}")
 
 
+def nearest_seen(V: np.ndarray, names: list[str], seen: list[str]) -> dict[str, str]:
+    """V [goals, ...] at one observation: for each goal, the most similar *other* seen goal (cosine after removing
+    the mean over all instructions, i.e. what the instruction adds at this observation)."""
+    F = V.reshape(len(V), -1)
+    F = F - F.mean(0)
+    F = F / (np.linalg.norm(F, axis=1, keepdims=True) + 1e-9)
+    S = F @ F.T
+    si = [names.index(s) for s in seen]
+    return {n: seen[int(np.argmax([S[i, j] if j != i else -np.inf for j in si]))] for i, n in enumerate(names)}
+
+
+def binding(a) -> None:
+    """RESEARCH_PLAN §11.7 B1-B2: at the same observation, which seen goal does a novel instruction look like at the
+    action-head input (and in the predicted actions), and is that the goal the novel episode actually executed?"""
+    from collections import Counter, defaultdict
+    from pathlib import Path
+    X, L, _ = load(a.rec, a.labels)
+    cfg = json.load(open(Path(a.run_dir) / "run_config.json"))
+    name = dict(zip(cfg["goal_language"], cfg["goal_names"]))
+    names, seen = cfg["goal_names"], [n for n in cfg["goal_names"] if n.startswith("s")]
+    novel = [n for n in names if n not in seen]
+    eps = [json.loads(l) for l in open(Path(a.run_dir) / "episodes.jsonl")]
+    groups = defaultdict(dict)                                   # (episode, call) -> goal -> row
+    for i, l in enumerate(L):
+        if l["call"] % 10 == 0:                                  # SWAP_EVERY in langeval/adapters/starvla.py
+            groups[l["episode"], l["call"]][name[l["lang"]]] = i
+    groups = {k: g for k, g in groups.items() if len(g) == len(names)}
+    words = {n: set(l.split()) for l, n in name.items()}
+    by_text = {n: max((s for s in seen if s != n), key=lambda s: len(words[n] & words[s]) / len(words[n] | words[s]))
+               for n in names}
+    print(f"{len(groups)} complete instruction-swap groups ({len(names)} instructions each)")
+    for space in ("state", "action"):
+        near = {k: nearest_seen(np.stack([X[g[n]] if space == "state" else np.array(L[g[n]]["action"]) for n in names]),
+                                names, seen) for k, g in groups.items()}
+        print(f"\n[{space}] novel goal: most common nearest seen goal over all observations | text-nearest | "
+              f"failed episodes of that goal: nearest at its first call == executed")
+        hit = tot = 0
+        for n in novel:
+            mode = Counter(nr[n] for nr in near.values()).most_common(2)
+            fails = [(i, e) for i, e in enumerate(eps) if e["goal"] == n and not e["success"] and (i, 0) in near]
+            h = sum(near[i, 0][n] == e["executed"] for i, e in fails)
+            hit, tot = hit + h, tot + len(fails)
+            print(f"  {n:<4} {' '.join(f'{s} {c / len(near):.2f}' for s, c in mode):<20} | {by_text[n]:<3} | "
+                  f"{h}/{len(fails)}  executed: {dict(Counter(str(e['executed']) for _, e in fails))}")
+        print(f"  B{1 if space == 'state' else 2}: nearest == executed in {hit}/{tot} failed novel episodes"
+              f" ({hit / max(tot, 1):.2f}; chance about 0.1)")
+
+
 def main() -> None:
     if sys.argv[1:2] and sys.argv[1].endswith(".py"):      # wrapping the policy server
         return serve(sys.argv[1:])
@@ -175,7 +231,13 @@ def main() -> None:
     f.add_argument("--labels", required=True)
     f.add_argument("--out", required=True)
     f.add_argument("--seed", type=int, default=0)
-    fit(ap.parse_args())
+    f.add_argument("--run_config", required=True, help="run_config.json of the recorded eval_goals run")
+    b = sub.add_parser("binding")
+    b.add_argument("--rec", required=True)
+    b.add_argument("--labels", required=True)
+    b.add_argument("--run_dir", required=True, help="the recorded eval_goals --out dir")
+    a = ap.parse_args()
+    fit(a) if a.cmd == "fit" else binding(a)
 
 
 if __name__ == "__main__":

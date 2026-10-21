@@ -49,12 +49,16 @@ def test_starvla_client_flips_images_and_binarizes_gripper():
 
     p = object.__new__(StarVLAPolicy)
     p.client, p.chunk, p.unnorm_key, p.episode = Fake(), 2, "franka", -1
-    p.labels = io.StringIO()
+    p.labels, p.swap, p.call = io.StringIO(), ["put the bowl on the plate", "turn on the stove"], 0
     img = np.arange(224 * 224 * 3, dtype=np.uint8).reshape(224, 224, 3)
     p.begin()
     acts = p.act({"agentview_image": img, "robot0_eye_in_hand_image": img, "robot0_eef_pos": np.ones(3)},
                  "put the bowl on the plate")
-    assert json.loads(p.labels.getvalue()) == {"episode": 0, "lang": "put the bowl on the plate", "robot0_eef_pos": [1.0] * 3}
+    main, swap = [json.loads(l) for l in p.labels.getvalue().splitlines()]
+    assert main["lang"] == "put the bowl on the plate" and main["episode"] == 0 and main["robot0_eef_pos"] == [1.0] * 3
+    assert swap["lang"] == "turn on the stove" and swap["swap_of"] == main["lang"] and "swap_of" not in main
+    p.act({"agentview_image": img, "robot0_eye_in_hand_image": img}, "put the bowl on the plate")
+    assert len(p.labels.getvalue().splitlines()) == 3                     # no swaps off the SWAP_EVERY grid
     assert len(acts) == 2 and acts[0][6] == -1.0 and acts[1][6] == 1.0      # open (>0.5) -> -1, close -> +1
     assert np.array_equal(sent["examples"][0]["image"][0], img[::-1, ::-1])
     assert sent["examples"][0]["lang"] == "put the bowl on the plate" and sent["do_sample"] is False
@@ -211,7 +215,8 @@ def test_action_eraser_leaves_no_linear_covariance(tmp_path):
         for i in range(n):
             f.write(json.dumps({"episode": i // 10, "robot0_eef_pos": pos[i, 0].tolist(), "robot0_gripper_qpos": [0, 0],
                                 **{f"{o}_pos": pos[i, j + 1].tolist() for j, o in enumerate(ea.OBJ)}}) + "\n")
-    X, ep, Z = ea.load(str(tmp_path / "rec.f16"), str(tmp_path / "rec.jsonl"))
+    X, L, Z = ea.load(str(tmp_path / "rec.f16"), str(tmp_path / "rec.jsonl"))
+    ep = np.array([l["episode"] for l in L])
     z = Z["geom"]
     U, R = ea.erasers(X, z, rng)
     cov = lambda A: np.abs(np.einsum("nth,nk->thk", A - A.mean(0), z - z.mean(0))).max()
@@ -221,3 +226,14 @@ def test_action_eraser_leaves_no_linear_covariance(tmp_path):
     assert ea.r2(*(lambda Xe: (Xe[~te], z[~te], Xe[te], z[te]))(ea.apply(X, X.mean(0), U))) < 0.05
     assert R[0].shape == U.shape and np.abs(np.einsum("thk,thj->tkj", U, R[0])).max() < 0.3
     assert ea.knn_r2(X[~te], z[~te], X[te], z[te]) > 0.5
+
+
+def test_nearest_seen_ignores_the_shared_observation_and_itself():
+    spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
+    ea = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ea)
+    rng = np.random.default_rng(0)
+    base, d = rng.standard_normal(50) * 100, rng.standard_normal((3, 50))      # big shared part, 3 goal directions
+    V = np.stack([base + d[0], base + d[1], base + d[2], base + d[1] + .1 * d[2]])   # s0 s1 s2, n0 ~ s1
+    near = ea.nearest_seen(V, ["s0", "s1", "s2", "n0"], ["s0", "s1", "s2"])
+    assert near["n0"] == "s1" and near["s1"] != "s1"
