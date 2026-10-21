@@ -15,24 +15,24 @@ E=$RESULTS/erase
 P=$E/patch
 PATCHES="none full obj dest random"
 if [ "${1:-}" = report ]; then
-  cat logs/er-subspaces.txt
+  cat logs/er-subspaces-*.out | grep -v "^nproc\|^GPU"
   python scripts/erase_action.py patch_report $(for p in $PATCHES; do echo $P/$p-a $P/$p-b; done)
   exit
 fi
 [ -e $P ] && { echo "$P exists; move it away first" >&2; exit 1; }
 mkdir -p $P
 sub() { local id; id=$(sbatch --parsable "$@"); echo "$id $*" | cut -c1-200 >> logs/batch_1023.txt; echo "$id"; }
-echo "fitting the subspaces on this login node (CPU, no SU) ..."
-python scripts/erase_action.py subspaces --rec $E/rec.f16 --labels $E/rec.jsonl --run_dir $E/none \
-  --out $P/subspaces.npz | tee logs/er-subspaces.txt
+# Not on the login node: PSC kills processes past 1800 CPU-seconds (all threads counted).
+s=$(sub -t 0:30:00 -J er-subspaces --export=ALL,ENV=starvla bridges2/run.sbatch \
+  python scripts/erase_action.py subspaces --rec $E/rec.f16 --labels $E/rec.jsonl --run_dir $E/none --out $P/subspaces.npz)
 for p in $PATCHES; do
   for x in "a s4=s2,n2=s6 s4,n2" "b s4=s1 s4"; do
     set -- $x
     export LV_PATCH="$2"      # not in --export: Slurm splits its list on commas, so "s4=s2,n2=s6" would lose n2=s6
-    sub -t 3:00:00 -J er-patch-$p-$1 \
+    sub -t 3:00:00 -J er-patch-$p-$1 --dependency=afterok:$s \
       --export=ALL,SV_CKPT=$SV,SV_WRAP=$LANGVLA_ROOT/scripts/erase_action.py,LV_PATCH_U=$P/subspaces.npz:$p,LV_LABELS=$P/$p-$1/labels.jsonl \
       bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --sets seen,novel \
       --goals $3 --n_init 20 --out $P/$p-$1 > /dev/null
   done
 done
-echo "submitted 10 patch runs; ids in logs/batch_1023.txt"
+echo "submitted subspaces $s -> 10 patch runs; ids in logs/batch_1023.txt"
