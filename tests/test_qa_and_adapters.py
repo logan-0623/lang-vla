@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import random
 from pathlib import Path
@@ -47,9 +48,13 @@ def test_starvla_client_flips_images_and_binarizes_gripper():
             return {"data": {"actions": np.array([[[.1] * 6 + [.9], [.2] * 6 + [.1], [.3] * 7]])}}
 
     p = object.__new__(StarVLAPolicy)
-    p.client, p.chunk, p.unnorm_key = Fake(), 2, "franka"
+    p.client, p.chunk, p.unnorm_key, p.episode = Fake(), 2, "franka", -1
+    p.labels = io.StringIO()
     img = np.arange(224 * 224 * 3, dtype=np.uint8).reshape(224, 224, 3)
-    acts = p.act({"agentview_image": img, "robot0_eye_in_hand_image": img}, "put the bowl on the plate")
+    p.begin()
+    acts = p.act({"agentview_image": img, "robot0_eye_in_hand_image": img, "robot0_eef_pos": np.ones(3)},
+                 "put the bowl on the plate")
+    assert json.loads(p.labels.getvalue()) == {"episode": 0, "lang": "put the bowl on the plate", "robot0_eef_pos": [1.0] * 3}
     assert len(acts) == 2 and acts[0][6] == -1.0 and acts[1][6] == 1.0      # open (>0.5) -> -1, close -> +1
     assert np.array_equal(sent["examples"][0]["image"][0], img[::-1, ::-1])
     assert sent["examples"][0]["lang"] == "put the bowl on the plate" and sent["do_sample"] is False
@@ -190,3 +195,28 @@ def test_counter_pairs_groups_order_and_qa(tmp_path):
     for item, k in zip(data, ("gripper_offset", "held")):
         q, ref = item["conversations"][0]["value"].replace("<image>\n", ""), item["conversations"][1]["value"]
         assert eq.qtype(q) == k and all(eq.content_facts(ref, ref, k).values())
+
+
+def test_action_eraser_leaves_no_linear_covariance(tmp_path):
+    spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
+    ea = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ea)
+    rng = np.random.default_rng(1)
+    n, T, H = 300, 4, 64
+    pos = rng.uniform(-.3, .3, (n, 5, 3))
+    X = rng.standard_normal((n, T, H)) * .1 + (pos.reshape(n, -1) @ rng.standard_normal((15, H)))[:, None, :]
+    X.astype(np.float16).tofile(tmp_path / "rec.f16")
+    json.dump({"shape": [T, H]}, open(tmp_path / "rec.f16.json", "w"))
+    with open(tmp_path / "rec.jsonl", "w") as f:
+        for i in range(n):
+            f.write(json.dumps({"episode": i // 10, "robot0_eef_pos": pos[i, 0].tolist(),
+                                **{f"{o}_pos": pos[i, j + 1].tolist() for j, o in enumerate(ea.OBJ)}}) + "\n")
+    X, ep, Z = ea.load(str(tmp_path / "rec.f16"), str(tmp_path / "rec.jsonl"))
+    z = Z["geom"]
+    U, R = ea.erasers(X, z, rng)
+    cov = lambda A: np.abs(np.einsum("nth,nk->thk", A - A.mean(0), z - z.mean(0))).max()
+    assert cov(ea.apply(X, X.mean(0), U)) < 1e-4 * cov(X)
+    te = ep % 5 == 4
+    assert ea.r2(X[~te], z[~te], X[te], z[te]) > 0.95
+    assert ea.r2(*(lambda Xe: (Xe[~te], z[~te], Xe[te], z[te]))(ea.apply(X, X.mean(0), U))) < 0.05
+    assert R[0].shape == U.shape

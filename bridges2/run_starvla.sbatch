@@ -1,6 +1,7 @@
 #!/bin/bash
 # StarVLA policy server (starvla env) + one client command (vla env, LIBERO) on one L40S. The literal argument
-# SERVER is replaced by the server's host:port.
+# SERVER is replaced by the server's host:port. SV_WRAP (optional) runs the server under a wrapper, e.g.
+# SV_WRAP=$LANGVLA_ROOT/scripts/erase_action.py.
 #   sbatch --export=ALL,SV_CKPT=$CKPT/Qwen3-VL-OFT-LIBERO-4in1/checkpoints/steps_50000_pytorch_model.pt \
 #     bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --out ...
 #SBATCH -A cis260349p
@@ -16,7 +17,7 @@ PORT=$((20000 + SLURM_JOB_ID % 20000))
 nvidia-smi -L
 
 conda activate "$STORE/envs/starvla"
-( cd "$SRC" && PYTHONPATH=$SRC python deployment/model_server/server_policy.py --ckpt_path "${SV_CKPT:?}" \
+( cd "$SRC" && PYTHONPATH=$SRC python ${SV_WRAP:-} deployment/model_server/server_policy.py --ckpt_path "${SV_CKPT:?}" \
     --port "$PORT" --use_bf16 --seed 7 --idle_timeout -1 \
     --config_override framework.qwenvl.attn_implementation=sdpa ) > "logs/starvla-server-$SLURM_JOB_ID.log" 2>&1 &
 SERVER_PID=$!

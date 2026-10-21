@@ -11,6 +11,8 @@ loop, gripper open = action > 0.5 -> -1.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 LIBERO_ENV_RESOLUTION = 256
@@ -37,12 +39,24 @@ class StarVLAPolicy:
             (keys[0] if len(keys) == 1 else next((k for k in keys if suite in k), None))
         self.meta = meta
         self.deterministic = True     # OFT head, do_sample=False; checked at run time by orig vs orig_rep
+        # LV_LABELS: one json line of the observation's *_pos entries per server call, in call order, so that the
+        # server-side record of scripts/erase_action.py (same order) can be labelled.
+        import os
+        self.labels = open(os.environ["LV_LABELS"], "a") if os.environ.get("LV_LABELS") else None
+        self.episode = -1
+
+    def begin(self) -> None:
+        self.episode += 1
 
     def act(self, obs: dict, instruction: str) -> list[np.ndarray]:
         imgs = [_resize(np.ascontiguousarray(obs[k][::-1, ::-1])) for k in ("agentview_image", "robot0_eye_in_hand_image")]
         resp = self.client.predict_action({"examples": [{"image": imgs, "lang": instruction}],
                                            "unnorm_key": self.unnorm_key, "do_sample": False,
                                            "use_ddim": True, "num_ddim_steps": 10})
+        if self.labels:
+            self.labels.write(json.dumps({"episode": self.episode, "lang": instruction,
+                                          **{k: np.asarray(v).tolist() for k, v in obs.items() if k.endswith("_pos")}}) + "\n")
+            self.labels.flush()
         chunk = np.asarray(resp["data"]["actions"])[0][: self.chunk]
         out = []
         for a in chunk:
