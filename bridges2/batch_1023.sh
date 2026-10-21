@@ -2,7 +2,7 @@
 # Batch 2026-10-22: targeted activation patching at the action-head input (RESEARCH_PLAN §11.7, P0-P3 written before
 # these results). Same observation, instruction A executed, its action queries patched with donor B's along the
 # object subspace (instructions differing only in the object) or the destination subspace, from the batch_1021
-# instruction-swap groups (scripts/erase_action.py subspaces). ~10 GPU-h.
+# instruction-swap groups (scripts/erase_action.py subspaces). ~6-8 GPU-h.
 #   a: s4 (bowl -> cabinet top) <- s2 (wine -> cabinet top);  n2 (cheese -> cabinet top, done as s4) <- s6 (cheese -> bowl)
 #   b: s4 <- s1 (bowl -> stove)
 #   patches: none (batched pair, no change), full (all of B's queries), obj, dest, random (rank 4 each)
@@ -31,7 +31,7 @@ for p in $PATCHES; do
     sub -t 3:00:00 -J er-patch-$p-$1 \
       --export=ALL,SV_CKPT=$SV,SV_WRAP=$LANGVLA_ROOT/scripts/erase_action.py,LV_PATCH_U=$P/subspaces.npz:$p,LV_PATCH=$2,LV_LABELS=$P/$p-$1/labels.jsonl \
       bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --sets seen,novel \
-      --goals $3 --n_init 10 --out $P/$p-$1 > /dev/null
+      --goals $3 --n_init 20 --out $P/$p-$1 > /dev/null
   done
 done
 echo "submitted 10 patch runs; ids in logs/batch_1023.txt"

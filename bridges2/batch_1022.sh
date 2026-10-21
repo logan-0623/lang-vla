@@ -3,14 +3,14 @@
 # batch_1021 every concept eraser removed 3-4x more of ||x - mu|| than its variance-matched random control (geometry
 # is most of the action-query variance), so each concept is erased again only partially: alpha = mean random
 # fraction / concept fraction, from the batch_1021 er-fit log: eef .415/2/.622, dist .431/2/.685, geom .453/2/.824,
-# grip .329/2/.615. ~4 GPU-h.
+# grip .329/2/.615. ~2 GPU-h (batch_1021 runs took 10-30 min each).
 #   git pull ; bash bridges2/batch_1022.sh       (afterwards: bash bridges2/batch_1022.sh report)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source bridges2/config.sh
 SV=$CKPT/Qwen3-VL-OFT-LIBERO-4in1/checkpoints/steps_50000_pytorch_model.pt
 E=$RESULTS/erase
-RUNS=${RUNS:-"dist:0.315 geom:0.275"}          # budget (14 SU left, 10-22): eef:0.334 grip:0.267 not run
+RUNS=${RUNS:-"eef:0.334 dist:0.315 geom:0.275 grip:0.267"}
 if [ "${1:-}" = report ]; then
   for n in none eef eef-matched eef-random0 eef-random1 dist dist-matched dist-random0 dist-random1 \
            geom geom-matched geom-random0 geom-random1 grip grip-matched grip-random0 grip-random1; do
