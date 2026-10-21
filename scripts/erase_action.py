@@ -46,7 +46,7 @@ def serve(argv: list[str]) -> None:
     from starVLA.model.framework.VLM4A.QwenOFT import Qwenvl_OFT
 
     gather = Qwenvl_OFT._gather_action_token_embeddings
-    rec, erase = os.environ.get("LV_RECORD"), os.environ.get("LV_ERASE")
+    rec, erase, patch = os.environ.get("LV_RECORD"), os.environ.get("LV_ERASE"), os.environ.get("LV_PATCH_U")
     state = {}
 
     def hooked(self, *a, **k):
@@ -69,6 +69,17 @@ def serve(argv: list[str]) -> None:
             x = q.float() - mu
             proj = torch.einsum("thk,btk->bth", U, torch.einsum("thk,bth->btk", U, x))
             q = (q.float() - state["alpha"] * proj).to(q.dtype)
+        if patch and q.shape[0] == 2:                           # batch [A, donor B] from the client's LV_PATCH
+            if "P" not in state:
+                path, name = patch.rsplit(":", 1)
+                state["P"] = name if name in ("none", "full") else torch.tensor(np.load(path)[f"{name}.U"], device=q.device)
+                print(f"patching {name}", flush=True)
+            P, q = state["P"], q.clone()
+            if isinstance(P, str):
+                q[0] = q[1] if P == "full" else q[0]
+            else:
+                d = (q[1] - q[0]).float()
+                q[0] = (q[0].float() + torch.einsum("thk,tk->th", P, torch.einsum("thk,th->tk", P, d))).to(q.dtype)
         return q
 
     Qwenvl_OFT._gather_action_token_embeddings = hooked
@@ -219,13 +230,19 @@ def binding(a) -> None:
             hit, tot = hit + h, tot + len(fails)
             print(f"  {n:<4} {' '.join(f'{s} {c / len(near):.2f}' for s, c in mode):<20} | {by_text[n]:<3} | "
                   f"{h}/{len(fails)}  executed: {dict(Counter(str(e['executed']) for _, e in fails))}")
+        reach = sum(e["executed"] in seen for i, e in enumerate(eps) if e["goal"] in novel and not e["success"]
+                    and (i, 0) in near)
         print(f"  B{1 if space == 'state' else 2}: nearest == executed in {hit}/{tot} failed novel episodes"
-              f" ({hit / max(tot, 1):.2f}; chance about 0.1)")
+              f" ({hit / max(tot, 1):.2f}; chance about 0.1; ceiling {reach}/{tot}: only seen goals can match)")
         # Exploratory (after the B1-B2 results, 2026-10-22): failures that completed a *seen* goal only, and the
         # nearest seen goal over each novel episode's own observations by progress (call 0 / 10-20 / 30+).
         own = [(i, e) for i, e in enumerate(eps) if e["goal"] in novel and not e["success"] and e["executed"] in seen]
         h = sum(near[i, 0][e["goal"]] == e["executed"] for i, e in own if (i, 0) in near)
-        print(f"  exploratory: failures that completed a seen goal: nearest at first call == executed {h}/{len(own)}")
+        top = Counter(e["executed"] for _, e in own).most_common(1)[0][0] if own else None
+        print(f"  conditional (follow-up, not B1/B2): failures that completed a seen goal: nearest at first call =="
+              f" executed {h}/{len(own)}; baselines on the same episodes: text-nearest (Jaccard)"
+              f" {sum(by_text[e['goal']] == e['executed'] for _, e in own)}/{len(own)}, most frequent executed goal"
+              f" ({top}, in-sample) {sum(e['executed'] == top for _, e in own)}/{len(own)}")
         for n in novel:
             bins = {b: Counter() for b in ("0", "10-20", "30+")}
             for (i, c), nr in near.items():
@@ -245,6 +262,77 @@ def binding(a) -> None:
         print(f"  {n:<4} {cfg['goal_language'][names.index(n)]:<52} {dict(Counter(moved[n]))}")
 
 
+# §11.7 P0-P3: instruction sets that differ only in the object (same destination) / only in the destination (same
+# object). n2 (cream cheese -> cabinet top, executed as bowl -> cabinet top) is the test case, never used to fit.
+OBJ_SETS = [["s2", "s4"], ["s1", "n1", "n4"], ["s8", "n0", "n3"]]
+DEST_SETS = [["s1", "s3", "s4", "s8", "n5"], ["s6", "n0", "n1"], ["s2", "s9", "n3", "n4"]]
+K_PATCH = 4
+
+
+def swap_groups(L: list[dict], names: dict[str, str]) -> list[dict[str, int]]:
+    """(episode, call) groups of the er-record run in which every instruction was sent with one observation."""
+    from collections import defaultdict
+    g = defaultdict(dict)
+    for i, l in enumerate(L):
+        if l["call"] % 10 == 0:                                  # SWAP_EVERY in langeval/adapters/starvla.py
+            g[l["episode"], l["call"]][names[l["lang"]]] = i
+    return [v for v in g.values() if len(v) == len(set(names.values()))]
+
+
+def top_basis(D: np.ndarray, k: int) -> np.ndarray:
+    """D [n, chunk, H] -> per token position the top-k left singular directions, [chunk, H, k]."""
+    return np.stack([np.linalg.svd(D[:, t].T, full_matrices=False)[0][:, :k] for t in range(D.shape[1])])
+
+
+def subspaces(a) -> None:
+    """Object and destination subspaces of the action queries from the instruction-swap groups: what changes when only
+    the object (only the destination) of the instruction changes at one observation. Random control: rank-k random
+    directions inside the top-32 principal directions of all instruction-induced variation."""
+    from pathlib import Path
+    X, L, _ = load(a.rec, a.labels)
+    cfg = json.load(open(Path(a.run_dir) / "run_config.json"))
+    name = dict(zip(cfg["goal_language"], cfg["goal_names"]))
+    G = swap_groups(L, name)
+    diffs = lambda sets: np.concatenate([X[[g[n] for n in st]] - X[[g[n] for n in st]].mean(0) for g in G for st in sets])
+    Dobj, Ddest = diffs(OBJ_SETS), diffs(DEST_SETS)
+    Dall = diffs([[n for n in cfg["goal_names"] if n != "n2"]])
+    rng = np.random.default_rng(a.seed)
+    Uo, Ud, Ua = top_basis(Dobj, K_PATCH), top_basis(Ddest, K_PATCH), top_basis(Dall, 32)
+    R = np.stack([np.linalg.qr(Ua[t] @ rng.standard_normal((32, K_PATCH)))[0] for t in range(Ua.shape[0])])
+    share = lambda D, U: float((np.einsum("thk,nth->ntk", U, D) ** 2).sum() / (D ** 2).sum())
+    print(f"{len(G)} groups; object diffs {len(Dobj)}, destination diffs {len(Ddest)}; rank {K_PATCH} per token")
+    for nm, U in (("obj", Uo), ("dest", Ud), ("random", R)):
+        print(f"  {nm:<6} captures {share(Dobj, U):.2f} of object-change variance, {share(Ddest, U):.2f} of "
+              f"destination-change, {share(Dall, U):.2f} of all instruction-induced variation")
+    cos = np.mean([np.linalg.svd(Uo[t].T @ Ud[t], compute_uv=False).max() for t in range(Uo.shape[0])])
+    print(f"  largest cosine between obj and dest subspaces (mean over tokens): {cos:.2f}")
+    np.savez(a.out, **{"obj.U": Uo.astype(np.float32), "dest.U": Ud.astype(np.float32), "random.U": R.astype(np.float32)})
+    print(f"wrote {a.out}")
+
+
+def patch_report(a) -> None:
+    """One line per patch run: requested-goal success, donor goal completed, object moved > 5 cm."""
+    from collections import Counter
+    from pathlib import Path
+    for d in a.runs:
+        cfg = json.load(open(Path(d) / "run_config.json"))
+        eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
+        L = [json.loads(l) for l in open(Path(d) / "labels.jsonl")]
+        donors = dict(kv.split("=") for kv in cfg.get("env", {}).get("LV_PATCH", "").split(",") if kv)
+        for goal in dict.fromkeys(e["goal"] for e in eps):
+            idx = [i for i, e in enumerate(eps) if e["goal"] == goal]
+            moved = Counter()
+            for i in idx:
+                rows = [l for l in L if l["episode"] == i]
+                dd = {o: np.linalg.norm(np.subtract(rows[-1][f"{o}_pos"], rows[0][f"{o}_pos"])) for o in OBJ}
+                o, m = max(dd.items(), key=lambda kv: kv[1])
+                moved[o.split("_")[0] if m > 0.05 else "none"] += 1
+            b = donors.get(goal)
+            don = sum(b in eps[i]["completed_other"] for i in idx) if b else 0
+            print(f"{Path(d).name:<16} {goal}<-{b or '-':<3} success {sum(eps[i]['success'] for i in idx)}/{len(idx)}"
+                  f"  donor goal done {don}/{len(idx)}  moved {dict(moved)}")
+
+
 def main() -> None:
     if sys.argv[1:2] and sys.argv[1].endswith(".py"):      # wrapping the policy server
         return serve(sys.argv[1:])
@@ -260,8 +348,16 @@ def main() -> None:
     b.add_argument("--rec", required=True)
     b.add_argument("--labels", required=True)
     b.add_argument("--run_dir", required=True, help="the recorded eval_goals --out dir")
+    sp = sub.add_parser("subspaces")
+    sp.add_argument("--rec", required=True)
+    sp.add_argument("--labels", required=True)
+    sp.add_argument("--run_dir", required=True)
+    sp.add_argument("--out", required=True)
+    sp.add_argument("--seed", type=int, default=0)
+    pr = sub.add_parser("patch_report")
+    pr.add_argument("runs", nargs="+", help="eval_goals --out dirs of the patch runs (with labels.jsonl)")
     a = ap.parse_args()
-    fit(a) if a.cmd == "fit" else binding(a)
+    {"fit": fit, "binding": binding, "subspaces": subspaces, "patch_report": patch_report}[a.cmd](a)
 
 
 if __name__ == "__main__":

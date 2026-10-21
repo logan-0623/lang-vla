@@ -20,11 +20,14 @@ IMAGE_SIZE = (224, 224)
 SWAP_EVERY = 10
 
 
-def _all_goal_languages() -> list[str]:
+def _goal_languages() -> dict[str, str]:
+    """Goal name (s0-s9 in benchmark order, then the novel ids) -> instruction, as in scripts/eval_goals.py."""
+    import json
     from pathlib import Path
-    from langeval.goal_predicates import load_goals, load_novel_goals
-    novel = Path(__file__).parents[2] / "configs/novel_goals.json"
-    return [g.language for g in load_goals("libero_goal") + load_novel_goals(str(novel))]
+    from langeval.goal_predicates import load_goals
+    novel = json.load(open(Path(__file__).parents[2] / "configs/novel_goals.json"))["goals"]
+    return {**{f"s{i}": g.language for i, g in enumerate(load_goals("libero_goal"))},
+            **{g["id"]: g["language"] for g in novel}}
 
 
 def _resize(img: np.ndarray) -> np.ndarray:
@@ -53,14 +56,22 @@ class StarVLAPolicy:
         # each other LIBERO-Goal / novel instruction (answers only recorded, never executed; RESEARCH_PLAN §11.7).
         import os
         self.labels = open(os.environ["LV_LABELS"], "a") if os.environ.get("LV_LABELS") else None
-        self.swap = _all_goal_languages() if self.labels and os.environ.get("LV_SWAP") else []
+        self.swap = list(_goal_languages().values()) if self.labels and os.environ.get("LV_SWAP") else []
+        # LV_PATCH="s4=s2,n2=s6": when the instruction is goal A, the same observation goes to the server as a batch
+        # [A, donor B]; the server (scripts/erase_action.py, LV_PATCH_U) patches A's action queries from B's and
+        # only A's actions are executed (RESEARCH_PLAN §11.7 P0-P3).
+        gl = _goal_languages() if os.environ.get("LV_PATCH") else {}
+        pairs = [kv.split("=") for kv in os.environ.get("LV_PATCH", "").split(",") if kv]
+        self.patch = {gl[a]: gl[b] for a, b in pairs}
         self.episode, self.call = -1, 0
 
     def begin(self) -> None:
         self.episode, self.call = self.episode + 1, 0
 
     def _query(self, imgs: list, lang: str) -> np.ndarray:
-        resp = self.client.predict_action({"examples": [{"image": imgs, "lang": lang}],
+        donor = getattr(self, "patch", {}).get(lang)
+        examples = [{"image": imgs, "lang": l} for l in ([lang, donor] if donor else [lang])]
+        resp = self.client.predict_action({"examples": examples,
                                            "unnorm_key": self.unnorm_key, "do_sample": False,
                                            "use_ddim": True, "num_ddim_steps": 10})
         return np.asarray(resp["data"]["actions"])[0][: self.chunk]

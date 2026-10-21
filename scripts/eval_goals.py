@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import time
 from collections import Counter
@@ -33,6 +34,7 @@ def main() -> None:
     ap.add_argument("--backend", default="upstream", choices=["upstream", "lerobot", "starvla"])
     ap.add_argument("--sets", default="seen,novel", help="seen = the 10 LIBERO-Goal tasks, novel = configs/novel_goals.json")
     ap.add_argument("--novel_json", default=str(ROOT / "configs/novel_goals.json"))
+    ap.add_argument("--goals", default=None, help="only these goal names, e.g. s4,n2 (default: all of --sets)")
     ap.add_argument("--n_init", type=int, default=20)
     ap.add_argument("--hold_steps", type=int, default=10)
     ap.add_argument("--seed", type=int, default=7)
@@ -51,12 +53,15 @@ def main() -> None:
     names = [f"s{i}" for i in range(len(seen))] + [g["id"] for g in json.load(open(args.novel_json))["goals"]]
     (out / "run_config.json").write_text(json.dumps({
         **vars(args), "max_steps": max_steps, "goal_names": names, "goal_language": [g.language for g in goals],
+        "env": {k: v for k, v in os.environ.items() if k.startswith("LV_")},
         "git_langvla": subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
         "started": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=2))
 
     sets = args.sets.split(",")
     todo = ([(i, i) for i in range(len(seen))] if "seen" in sets else []) + \
            ([(len(seen) + j, 0) for j in range(len(novel))] if "novel" in sets else [])   # (goal, env task); scene is shared
+    if args.goals:
+        todo = [(gi, t) for gi, t in todo if names[gi] in args.goals.split(",")]
     episodes = open(out / "episodes.jsonl", "w")
     for gi, task_id in todo:
         env, _ = make_env(suite, task_id)

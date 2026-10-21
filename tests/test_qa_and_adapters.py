@@ -237,3 +237,20 @@ def test_nearest_seen_ignores_the_shared_observation_and_itself():
     V = np.stack([base + d[0], base + d[1], base + d[2], base + d[1] + .1 * d[2]])   # s0 s1 s2, n0 ~ s1
     near = ea.nearest_seen(V, ["s0", "s1", "s2", "n0"], ["s0", "s1", "s2"])
     assert near["n0"] == "s1" and near["s1"] != "s1"
+
+
+def test_starvla_client_sends_donor_as_second_example():
+    sent = {}
+
+    class Fake:
+        def predict_action(self, q):
+            sent.update(q)
+            return {"data": {"actions": np.array([[[.1] * 7] * 2, [[.9] * 7] * 2])}}
+
+    p = object.__new__(StarVLAPolicy)
+    p.client, p.chunk, p.unnorm_key, p.labels, p.call = Fake(), 2, "franka", None, 0
+    p.patch = {"put the cream cheese on top of the cabinet": "put the cream cheese in the bowl"}
+    img = np.zeros((224, 224, 3), np.uint8)
+    acts = p.act({"agentview_image": img, "robot0_eye_in_hand_image": img}, "put the cream cheese on top of the cabinet")
+    assert [e["lang"] for e in sent["examples"]] == ["put the cream cheese on top of the cabinet", "put the cream cheese in the bowl"]
+    assert acts[0][0] == np.float32(.1)                                    # the requested goal's actions, not the donor's
