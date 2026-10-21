@@ -166,3 +166,27 @@ def test_balanced_build_evens_held_answers():
             if q == "What is the gripper holding?":
                 held.append(a == "Nothing.")
     assert 0.4 < np.mean(held) < 0.6
+
+
+def test_counter_pairs_groups_order_and_qa(tmp_path):
+    import sys
+    sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+    import make_counter_pairs as C
+    spec = importlib.util.spec_from_file_location("eq", Path(__file__).parents[1] / "scripts/eval_qa.py")
+    eq = importlib.util.module_from_spec(spec); spec.loader.exec_module(eq)
+    ray = {"kind": "ray", "reach_err": 0.005, "px2d": 3.0}
+    assert C.group({**ray, "dist3d": 0.06}) == "consistent" and C.group({**ray, "dist3d": 0.25}) == "counter"
+    assert C.group({**ray, "dist3d": 0.14}) is None and C.group({**ray, "dist3d": 0.25, "px2d": 40}) is None
+    assert C.group({**ray, "dist3d": 0.06, "reach_err": 0.05}) is None
+    assert C.group({"kind": "grip", "reach_err": 0.0, "held": False}) == "counter"
+    parent, true = np.array([0, 0, 0, 1, 1, 1]), np.array([.06, .12, .19, .06, .12, .19])
+    assert C.pair_order(parent, true, true * 2) == 1.0 and C.pair_order(parent, true, -true) == 0.0
+    assert C.pair_order(parent, true, np.zeros(6)) == 0.0          # ties are not "ordered"
+    fr = [{"image": "a.png", "scene": 0, "facts": FACTS, "cf": {"kind": "ray", "object": "plate_1"}},
+          {"image": "b.png", "scene": 0, "facts": FACTS, "cf": {"kind": "grip", "object": "plate_1"}}]
+    (tmp_path / "llava_jsons").mkdir()
+    C.write_qa(tmp_path, fr)
+    data = json.loads((tmp_path / "llava_jsons" / "libero_qa_lang_heldout.json").read_text())
+    for item, k in zip(data, ("gripper_offset", "held")):
+        q, ref = item["conversations"][0]["value"].replace("<image>\n", ""), item["conversations"][1]["value"]
+        assert eq.qtype(q) == k and all(eq.content_facts(ref, ref, k).values())
