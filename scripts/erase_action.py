@@ -5,8 +5,8 @@ with the concept erased vs a random subspace of the same rank.
 
   serve  : `erase_action.py <server_policy.py> <its args>` wraps the StarVLA policy server (SV_WRAP in
            bridges2/run_starvla.sbatch). LV_RECORD=f appends every call's action queries (float16) to f;
-           LV_ERASE=f.npz:name applies that eraser. The client (langeval/adapters/starvla.py) writes the matching
-           labels with LV_LABELS, in the same call order.
+           LV_ERASE=f.npz:name[:alpha] applies that eraser (alpha < 1: only that fraction of the projection). The
+           client (langeval/adapters/starvla.py) writes the matching labels with LV_LABELS, in the same call order.
   fit    : erasers from a recorded run. Per action-token position t, U_t = orthonormal basis of the cross-covariance
            Cov(x_t, z); x_t <- x_t - U_t U_t^T (x_t - mu_t) leaves no linear covariance with z (so no linear probe,
            on one token or all of them concatenated, beats the mean). Random control: variance-matched principal
@@ -59,14 +59,16 @@ def serve(argv: list[str]) -> None:
             state["f"].flush()
         if erase:
             if "U" not in state:
-                path, name = erase.rsplit(":", 1)
+                path, name, *alpha = erase.split(":")
+                state["alpha"] = float(alpha[0]) if alpha else 1.0          # partial erasure (dose matching)
                 z = np.load(path)
                 state["U"] = torch.tensor(z[f"{name}.U"], device=q.device)       # [chunk, H, k]
                 state["mu"] = torch.tensor(z["mu"], device=q.device)            # [chunk, H]
-                print(f"erasing {name}: U {tuple(state['U'].shape)}", flush=True)
+                print(f"erasing {name} x{state['alpha']}: U {tuple(state['U'].shape)}", flush=True)
             U, mu = state["U"], state["mu"]
             x = q.float() - mu
-            q = (q.float() - torch.einsum("thk,btk->bth", U, torch.einsum("thk,bth->btk", U, x))).to(q.dtype)
+            proj = torch.einsum("thk,btk->bth", U, torch.einsum("thk,bth->btk", U, x))
+            q = (q.float() - state["alpha"] * proj).to(q.dtype)
         return q
 
     Qwenvl_OFT._gather_action_token_embeddings = hooked
@@ -219,6 +221,28 @@ def binding(a) -> None:
                   f"{h}/{len(fails)}  executed: {dict(Counter(str(e['executed']) for _, e in fails))}")
         print(f"  B{1 if space == 'state' else 2}: nearest == executed in {hit}/{tot} failed novel episodes"
               f" ({hit / max(tot, 1):.2f}; chance about 0.1)")
+        # Exploratory (after the B1-B2 results, 2026-10-22): failures that completed a *seen* goal only, and the
+        # nearest seen goal over each novel episode's own observations by progress (call 0 / 10-20 / 30+).
+        own = [(i, e) for i, e in enumerate(eps) if e["goal"] in novel and not e["success"] and e["executed"] in seen]
+        h = sum(near[i, 0][e["goal"]] == e["executed"] for i, e in own if (i, 0) in near)
+        print(f"  exploratory: failures that completed a seen goal: nearest at first call == executed {h}/{len(own)}")
+        for n in novel:
+            bins = {b: Counter() for b in ("0", "10-20", "30+")}
+            for (i, c), nr in near.items():
+                if eps[i]["goal"] == n:
+                    bins["0" if c == 0 else "10-20" if c <= 20 else "30+"][nr[n]] += 1
+            print(f"    {n:<4} by progress: " + " | ".join(
+                f"{b}: " + " ".join(f"{s} {k}" for s, k in cnt.most_common(2)) for b, cnt in bins.items() if cnt))
+    moved = defaultdict(list)                                    # which movable object each novel episode moved
+    for ep_i in sorted({l["episode"] for l in L}):
+        rows = [l for l in L if l["episode"] == ep_i and "swap_of" not in l]
+        d = {o: np.linalg.norm(np.subtract(rows[-1][f"{o}_pos"], rows[0][f"{o}_pos"])) for o in OBJ}
+        if eps[ep_i]["goal"] in novel:
+            o, m = max(d.items(), key=lambda kv: kv[1])
+            moved[eps[ep_i]["goal"]].append(o.split("_")[0] if m > 0.05 else "none")
+    print("\nobject moved > 5 cm (largest displacement, first to last call) in each novel goal's episodes:")
+    for n in novel:
+        print(f"  {n:<4} {cfg['goal_language'][names.index(n)]:<52} {dict(Counter(moved[n]))}")
 
 
 def main() -> None:
