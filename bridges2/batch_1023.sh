@@ -28,8 +28,9 @@ python scripts/erase_action.py subspaces --rec $E/rec.f16 --labels $E/rec.jsonl 
 for p in $PATCHES; do
   for x in "a s4=s2,n2=s6 s4,n2" "b s4=s1 s4"; do
     set -- $x
+    export LV_PATCH="$2"      # not in --export: Slurm splits its list on commas, so "s4=s2,n2=s6" would lose n2=s6
     sub -t 3:00:00 -J er-patch-$p-$1 \
-      --export=ALL,SV_CKPT=$SV,SV_WRAP=$LANGVLA_ROOT/scripts/erase_action.py,LV_PATCH_U=$P/subspaces.npz:$p,LV_PATCH=$2,LV_LABELS=$P/$p-$1/labels.jsonl \
+      --export=ALL,SV_CKPT=$SV,SV_WRAP=$LANGVLA_ROOT/scripts/erase_action.py,LV_PATCH_U=$P/subspaces.npz:$p,LV_LABELS=$P/$p-$1/labels.jsonl \
       bridges2/run_starvla.sbatch python scripts/eval_goals.py --backend starvla --checkpoint SERVER --sets seen,novel \
       --goals $3 --n_init 20 --out $P/$p-$1 > /dev/null
   done

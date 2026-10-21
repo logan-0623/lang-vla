@@ -155,12 +155,33 @@ def knn_r2(Xtr, ztr, Xte, zte, k=10) -> float:
     return float(1 - ((pred - zte) ** 2).sum() / ((zte - ztr.mean(0)) ** 2).sum())
 
 
-def fit(a) -> None:
+def seen_calls(a) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    """The calibration states: executed calls of the seen goals (no instruction swaps, no novel goals)."""
     X, L, Z = load(a.rec, a.labels)
     cfg = json.load(open(a.run_config))
     seen = {l for l, n in zip(cfg["goal_language"], cfg["goal_names"]) if n.startswith("s")}
-    keep = np.array(["swap_of" not in l and l["lang"] in seen for l in L])       # executed calls, seen goals only
-    X, ep, Z = X[keep], np.array([l["episode"] for l in L])[keep], {c: z[keep] for c, z in Z.items()}
+    keep = np.array(["swap_of" not in l and l["lang"] in seen for l in L])
+    return X[keep], np.array([l["episode"] for l in L])[keep], {c: z[keep] for c, z in Z.items()}
+
+
+def alphas(a) -> None:
+    """Dose matching for batch_1022: alpha = mean removed fraction of the two random erasers / that of the concept
+    eraser, with the *served* erasers (erasers.npz: U and mu fit on all seen calls) on those same calls. The removed
+    norm is linear in alpha, so alpha x concept then removes what a random eraser removes."""
+    X, _, _ = seen_calls(a)
+    z = np.load(a.erasers)
+    norm = np.linalg.norm(X - z["mu"], axis=2).mean()
+    frac = lambda nm: float(np.linalg.norm(X - apply(X, z["mu"], z[f"{nm}.U"]), axis=2).mean() / norm)
+    out = {}
+    for c in CONCEPTS:
+        r = np.mean([frac(f"{c}-random{i}") for i in range(N_RANDOM)])
+        out[c] = round(r / frac(c), 3)
+        print(f"{c:<5} concept removes {frac(c):.3f}, random {r:.3f} -> alpha {out[c]}")
+    json.dump(out, open(a.out, "w"))
+
+
+def fit(a) -> None:
+    X, ep, Z = seen_calls(a)
     rng = np.random.default_rng(a.seed)
     te = ep % 5 == 4                                            # readability check: held-out episodes
     mu = X.mean(0)
@@ -354,10 +375,16 @@ def main() -> None:
     sp.add_argument("--run_dir", required=True)
     sp.add_argument("--out", required=True)
     sp.add_argument("--seed", type=int, default=0)
+    al = sub.add_parser("alphas")
+    al.add_argument("--rec", required=True)
+    al.add_argument("--labels", required=True)
+    al.add_argument("--run_config", required=True)
+    al.add_argument("--erasers", required=True)
+    al.add_argument("--out", required=True)
     pr = sub.add_parser("patch_report")
     pr.add_argument("runs", nargs="+", help="eval_goals --out dirs of the patch runs (with labels.jsonl)")
     a = ap.parse_args()
-    {"fit": fit, "binding": binding, "subspaces": subspaces, "patch_report": patch_report}[a.cmd](a)
+    {"fit": fit, "binding": binding, "subspaces": subspaces, "alphas": alphas, "patch_report": patch_report}[a.cmd](a)
 
 
 if __name__ == "__main__":
