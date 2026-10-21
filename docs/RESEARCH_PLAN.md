@@ -738,7 +738,7 @@ E3 / E4 是单个环境串行运行，而且每条分叉都要做一次 hard res
 | [VLA-Trace](https://arxiv.org/html/2605.30117)（π0.5、OpenVLA） | CKA 看各层表征漂移；attention knockout 切断视觉/语言到动作 token 的注意力，看成功率；遮挡目标/夹爪图块；改指令名词 | 都用成功率判断"必要性"；都区分 VLM 与动作通路 | 它的干预是**模态/通路级**（整类 token），不是概念级；没有探针、没有随机对照（作者自列为局限）；作者把充分性测试（activation patching）留作未来工作 |
 | [Häon 等，CoRL 2025](https://arxiv.org/html/2509.00328)（π0-FAST、OpenVLA） | FFN value vector 投到词表，按词义（fast/slow、up、low/high）聚类，推理时把这些神经元设成常数来"引导"动作 | 都在推理时改激活、都看行为 | 它的概念是**动作属性**，由词表投影定义；量的是位移和高度，不是成功率；随机对照只在真机上做。我们的概念是**场景状态变量**，由仿真真值定义 |
 | [Not All Features Are Created Equal / Action Atlas](https://arxiv.org/abs/2603.19233)（Grant 等，六个 VLA） | 把任务 A 的激活整体注入动作专家，π0.5 在 99.6% 的回合执行 A 的轨迹，且绑定在**绝对工作空间坐标**上；SAE；随机方向对照 | 最接近"VLM→动作接口"的分析，也有随机对照 | 它替换整段激活，看不出是哪个变量；我们只动一个由真值定义的低秩子空间。它的"绝对坐标"结论给出可检验的预测（E5） |
-| Goodfire | 未找到 VLM–动作接口的专文（2026-10-21 查其研究列表）。借用 [Steering Along Manifolds](https://www.goodfire.com/research/the-world-inside-neural-networks) 的提醒：变量若在弯曲流形上，线性干预会把激活推离数据分布，造成与变量无关的损伤，也会留下非线性信息 | — | 据此加入方差匹配的随机对照和 kNN 非线性残留检查；充分性测试用"换入另一状态的坐标"（留在分布内），而不是加方向 |
+| Goodfire | 未找到 VLM–动作接口的专文（2026-10-21 查其研究列表）。借用 [The World Inside Neural Networks](https://www.goodfire.com/research/the-world-inside-neural-networks)（含 mountain-car 流形引导例子）的提醒：变量若在弯曲流形上，线性干预会把激活推离数据分布，造成与变量无关的损伤，也会留下非线性信息 | — | 据此加入方差匹配的随机对照和 kNN 非线性残留检查；充分性测试用"换入另一状态的坐标"（留在分布内），而不是加方向 |
 
 **本设计的区别**：干预对象是由仿真真值定义的场景状态变量（不是模态、不是词表方向、不是整段激活）；位置在动作头唯一的输入上；同时做必要性（擦除，本节第一阶段）和充分性（子空间互换，第二阶段）；随机对照按方差匹配；擦除后检查线性和非线性残留；结果看闭环成功率，并且和 11.6.3a 测的是同一个量。
 
