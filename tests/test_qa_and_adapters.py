@@ -252,6 +252,13 @@ def test_contrast_basis_drops_the_shared_direction():
     assert abs(ea.top_basis(Dp, 1)[0, 0, 0]) > .99 and abs(ea.contrast_basis(Dp, Dn, 1)[0, 1, 0]) > .99
 
 
+def test_erase_action_commands_exist():
+    spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
+    ea = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ea)
+    assert all(callable(getattr(ea, c, None)) for c in ("fit", "binding", "subspaces", "alphas", "patch_report", "landing"))
+
+
 def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
     ea = importlib.util.module_from_spec(spec)

@@ -459,6 +459,29 @@ def landing(a) -> None:
                   f" (<12 cm {sum(x < 0.12 for x in tgt)}/{len(tgt)})  moved: {dict(where)}")
 
 
+def patch_report(a) -> None:
+    """One line per patch run: requested-goal success, donor goal completed, object moved > 5 cm."""
+    from collections import Counter
+    from pathlib import Path
+    for d in a.runs:
+        if not (Path(d) / "episodes.jsonl").exists():
+            print(f"{Path(d).name:<16} not finished")
+            continue
+        cfg = json.load(open(Path(d) / "run_config.json"))
+        eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
+        L = [json.loads(l) for l in open(Path(d) / "labels.jsonl")]
+        donors = dict(kv.split("=") for kv in cfg.get("env", {}).get("LV_PATCH", "").split(",") if kv)
+        for goal in dict.fromkeys(e["goal"] for e in eps):
+            idx = [i for i, e in enumerate(eps) if e["goal"] == goal]
+            moved = Counter()
+            for i in idx:
+                moved[moved_object([l for l in L if l["episode"] == i])[0]] += 1
+            b = donors.get(goal)
+            don = sum(b in eps[i]["completed_other"] for i in idx) if b else 0
+            print(f"{Path(d).name:<16} {goal}<-{b or '-':<3} success {sum(eps[i]['success'] for i in idx)}/{len(idx)}"
+                  f"  donor goal done {don}/{len(idx)}  moved {dict(moved)}")
+
+
 def main() -> None:
     if sys.argv[1:2] and sys.argv[1].endswith(".py"):      # wrapping the policy server
         return serve(sys.argv[1:])
