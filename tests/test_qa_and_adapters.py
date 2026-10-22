@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 import io
 import json
@@ -249,6 +250,26 @@ def test_contrast_basis_drops_the_shared_direction():
     Dp = (shared * e[0] + own * e[1] + rng.standard_normal((500, 20)) * .05)[:, None]
     Dn = (rng.standard_normal((500, 1)) * 10 * e[0] + rng.standard_normal((500, 20)) * .05)[:, None]
     assert abs(ea.top_basis(Dp, 1)[0, 0, 0]) > .99 and abs(ea.contrast_basis(Dp, Dn, 1)[0, 1, 0]) > .99
+
+
+def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
+    spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
+    ea = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ea)
+    run = tmp_path / "run"
+    run.mkdir()
+    start = {f"{o}_pos": [0, 0, 0] for o in ea.OBJ}
+    # s1 (bowl -> stove) succeeds with the bowl at x=1; n1 (cheese -> stove) succeeds with the cheese at x=5
+    ends = [("s1", {**start, "akita_black_bowl_1_pos": [1, 0, 0]}), ("n1", {**start, "cream_cheese_1_pos": [5, 0, 0]})]
+    with open(run / "episodes.jsonl", "w") as f:
+        for g, end in ends:
+            f.write(json.dumps({"goal": g, "success": True, "final_pos": end}) + "\n")
+    with open(run / "labels.jsonl", "w") as f:
+        for i in range(2):
+            f.write(json.dumps({"episode": i, **start}) + "\n")
+    ea.landing(argparse.Namespace(anchor_run=str(run), anchor_labels=str(run / "labels.jsonl"), goals="", runs=[str(run)]))
+    out = capsys.readouterr().out
+    assert "stove n=1" in out and "n1 cream->stove" in out and "target median  400 cm" in out
 
 
 def test_starvla_client_sends_donor_as_second_example():

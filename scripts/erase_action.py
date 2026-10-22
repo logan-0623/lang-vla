@@ -71,14 +71,19 @@ def serve(argv: list[str]) -> None:
             q = (q.float() - state["alpha"] * proj).to(q.dtype)
         if patch and q.shape[0] == 2:                           # batch [A, donor B] from the client's LV_PATCH
             if "P" not in state:
-                path, name, *opt = patch.split(":")                         # path:name[:rank[:strength]]
-                k, state["beta"] = (int(opt[0]) if opt else None), (float(opt[1]) if len(opt) > 1 else 1.0)
+                # path:none | path:full:strength | path:name:rank:strength (subspaces2.npz keeps rank 64: no default)
+                path, name, *opt = patch.split(":")
+                if name != "none" and len(opt) != (1 if name == "full" else 2):
+                    raise SystemExit(f"LV_PATCH_U={patch}: give {'strength' if name == 'full' else 'rank:strength'}")
+                state["beta"] = float(opt[-1]) if opt else 1.0
                 state["P"] = name if name in ("none", "full") else \
-                    torch.tensor(np.load(path)[f"{name}.U"][:, :, :k], device=q.device)
-                print(f"patching {name} rank {k} x{state['beta']}", flush=True)
+                    torch.tensor(np.load(path)[f"{name}.U"][:, :, :int(opt[0])], device=q.device)
+                print(f"patching {name} {':'.join(opt)}", flush=True)
             P, q, beta = state["P"], q.clone(), state["beta"]
-            d = (q[1] - q[0]).float()
-            if isinstance(P, str):
+            d = q[1].float() - q[0].float()
+            if P == "full" and beta == 1.0:
+                q[0] = q[1]
+            elif isinstance(P, str):
                 q[0] = (q[0].float() + beta * d).to(q.dtype) if P == "full" else q[0]
             else:
                 q[0] = (q[0].float() + beta * torch.einsum("thk,tk->th", P, torch.einsum("thk,th->tk", P, d))).to(q.dtype)
@@ -290,6 +295,7 @@ def binding(a) -> None:
 OBJ_SETS = [["s2", "s4"], ["s1", "n1", "n4"], ["s8", "n0", "n3"]]
 DEST_SETS = [["s1", "s3", "s4", "s8", "n5"], ["s6", "n0", "n1"], ["s2", "s9", "n3", "n4"]]
 K_MAX = 64
+RANDOM_BG = 128
 
 
 def swap_groups(L: list[dict], names: dict[str, str]) -> list[dict[str, int]]:
@@ -330,48 +336,54 @@ def contrast_basis(Dp: np.ndarray, Dn: np.ndarray, k: int, lam: float = 0.1) -> 
 
 def subspaces(a) -> None:
     """Object and destination subspaces of the action queries from the instruction-swap groups: what changes when only
-    the object (only the destination) of the instruction changes at one observation. Saved at rank K_MAX (the server
-    takes the first k columns, so every rank is nested):
+    the object (only the destination) of the instruction changes at one observation. Saved at rank K_MAX; the server
+    takes the first k columns (nested ranks) and must be told k:
       obj, dest     : top principal directions of the object (destination) differences
-      obj_c, dest_c : contrastive, object differences relative to destination differences and vice versa
-      random        : a random rotation of the top-128 principal directions of all instruction-induced variation
-    Fits on the instruction-swap groups of train episodes (episode % 5 != 4) and prints the held-out shares by rank,
-    then refits on all groups for serving."""
+      obj_c, dest_c : contrastive, object differences relative to destination differences and vice versa (a soft
+                      preference, not orthogonality: check the printed leakage per rank)
+      random        : a random rotation of the top RANDOM_BG principal directions of all instruction-induced variation
+                      (batch_1023 used 32 with rank 4)
+    --exclude: goals left out of fitting entirely, both their instructions and the observations of their episodes
+    (held-out *combinations*). The remaining groups are split by episode (% 5 == 4 held out); the saved subspaces are
+    the ones fit on the train split, i.e. the ones whose held-out shares are printed. Split recorded in the npz."""
     from pathlib import Path
     X, L, _ = load(a.rec, a.labels)
     cfg = json.load(open(Path(a.run_dir) / "run_config.json"))
+    goal_of = [e["goal"] for e in map(json.loads, open(Path(a.run_dir) / "episodes.jsonl"))]
     name = dict(zip(cfg["goal_language"], cfg["goal_names"]))
-    G = swap_groups(L, name)
+    excl = set(a.exclude.split(",")) - {""}
+    G = [g for g in swap_groups(L, name) if goal_of[L[next(iter(g.values()))]["episode"]] not in excl]
     ep = lambda g: L[next(iter(g.values()))]["episode"]
+    keep = lambda sets: [st for st in ([n for n in st if n not in excl] for st in sets) if len(st) > 1]
+    osets, dsets = keep(OBJ_SETS), keep(DEST_SETS)
+    alln = keep([[n for n in cfg["goal_names"] if n != "n2"]])
     diffs = lambda G, sets: np.concatenate([X[[g[n] for n in st]] - X[[g[n] for n in st]].mean(0)
                                             for g in G for st in sets])
-    alln = [[n for n in cfg["goal_names"] if n != "n2"]]
     rng = np.random.default_rng(a.seed)
-
-    def bases(G):
-        Do, Dd, Da = diffs(G, OBJ_SETS), diffs(G, DEST_SETS), diffs(G, alln)
-        Ua = top_basis(Da, 128)
-        return {"obj": top_basis(Do, K_MAX), "dest": top_basis(Dd, K_MAX),
-                "obj_c": contrast_basis(Do, Dd, K_MAX), "dest_c": contrast_basis(Dd, Do, K_MAX),
-                "random": np.stack([np.linalg.qr(Ua[t] @ rng.standard_normal((128, K_MAX)))[0][:, :K_MAX]
-                                    for t in range(Ua.shape[0])])}
-
-    share = lambda D, U: float((np.einsum("thk,nth->ntk", U, D) ** 2).sum() / (D ** 2).sum())
     tr, te = [g for g in G if ep(g) % 5 != 4], [g for g in G if ep(g) % 5 == 4]
-    B = bases(tr)
-    Do, Dd, Da = diffs(te, OBJ_SETS), diffs(te, DEST_SETS), diffs(te, alln)
-    print(f"{len(G)} groups ({len(te)} held out); held-out share of object / destination / all instruction-induced "
-          f"variation, by rank:")
+    Do, Dd, Da = diffs(tr, osets), diffs(tr, dsets), diffs(tr, alln)
+    Ua = top_basis(Da, RANDOM_BG)
+    B = {"obj": top_basis(Do, K_MAX), "dest": top_basis(Dd, K_MAX),
+         "obj_c": contrast_basis(Do, Dd, K_MAX), "dest_c": contrast_basis(Dd, Do, K_MAX),
+         "random": np.stack([np.linalg.qr(Ua[t] @ rng.standard_normal((RANDOM_BG, K_MAX)))[0]
+                             for t in range(Ua.shape[0])])}
+    share = lambda D, U: float((np.einsum("thk,nth->ntk", U, D) ** 2).sum() / (D ** 2).sum())
+    Do, Dd, Da = diffs(te, osets), diffs(te, dsets), diffs(te, alln)
+    print(f"excluded goals {sorted(excl) or '-'}; object sets {osets}; destination sets {dsets}")
+    print(f"{len(tr)} train / {len(te)} held-out groups (by episode); held-out share of object / destination / all "
+          f"instruction-induced variation, by rank:")
     for nm, U in B.items():
         print(f"  {nm:<7}" + "  ".join(f"k={k}: {share(Do, U[:, :, :k]):.2f}/{share(Dd, U[:, :, :k]):.2f}/"
                                        f"{share(Da, U[:, :, :k]):.2f}" for k in (1, 4, 16, 64)))
-    for k in (4, 16):
+    for k in (1, 4, 16):
         cos = lambda u, v: np.mean([np.linalg.svd(u[t, :, :k].T @ v[t, :, :k], compute_uv=False).max()
                                     for t in range(u.shape[0])])
         print(f"  largest cosine at k={k}: obj/dest {cos(B['obj'], B['dest']):.2f}, obj_c/dest_c "
               f"{cos(B['obj_c'], B['dest_c']):.2f}")
-    np.savez(a.out, **{f"{nm}.U": U.astype(np.float32) for nm, U in bases(G).items()})
-    print(f"wrote {a.out}")
+    np.savez(a.out, **{f"{nm}.U": U.astype(np.float32) for nm, U in B.items()},
+             exclude=np.array(sorted(excl)), train_episodes=np.array(sorted({ep(g) for g in tr})),
+             heldout_episodes=np.array(sorted({ep(g) for g in te})), random_bg=RANDOM_BG, seed=a.seed)
+    print(f"wrote {a.out} (train-split fit)")
 
 
 def moved_object(rows: list[dict]) -> tuple[str, np.ndarray | None]:
@@ -381,85 +393,70 @@ def moved_object(rows: list[dict]) -> tuple[str, np.ndarray | None]:
     return (o.split("_")[0], np.array(rows[-1][f"{o}_pos"])) if m > 0.05 else ("none", None)
 
 
-# Destination of every place goal; plate and bowl are movable, so their own last position is the anchor.
+# Destination and target object of every place goal; plate and bowl are movable, so their own position is the anchor.
 DEST = {"s1": "stove", "s2": "cabinet", "s3": "drawer", "s4": "cabinet", "s5": "stove front", "s6": "bowl",
         "s8": "plate", "s9": "rack", "n0": "plate", "n1": "stove", "n2": "cabinet", "n3": "plate", "n4": "stove",
         "n5": "stove front", "n6": "drawer"}
+TARGET = {"s1": "akita", "s2": "wine", "s3": "akita", "s4": "akita", "s5": "plate", "s6": "cream", "s8": "akita",
+          "s9": "wine", "n0": "cream", "n1": "cream", "n2": "cream", "n3": "wine", "n4": "wine", "n5": "akita",
+          "n6": "cream"}
 MOVABLE_DEST = {"plate": "plate_1", "bowl": "akita_black_bowl_1"}
 
 
 def landing(a) -> None:
-    """Where did the moved object end up? Anchors for the fixed destinations: mean last position of the moved object
-    in the successful seen episodes of the recorded run; plate / bowl: their own last position in the episode.
-    Per run and goal: moved object -> nearest destination (if within 12 cm, else "elsewhere"), and the median
-    distance to the goal's own destination. Distances are object centres (a wine bottle's centre sits higher than a
-    bowl's, a few cm)."""
+    """Where were the objects at the end? Positions are the episode's final state when eval_goals recorded it
+    (`final_pos`), else the last policy call (the last chunk not yet executed: "last-decision position").
+    Anchors for fixed destinations: mean final position of the target object in successful *seen* (s*) episodes of
+    the anchor run; plate / bowl: their own position in the episode. Per run and goal: the moved object -> nearest
+    destination (within 12 cm, else "elsewhere"), and separately the target object's median distance to its own
+    destination. Position only: says where things were, not whether the policy "meant" it (no grasp / stability
+    check)."""
     from collections import Counter, defaultdict
     from pathlib import Path
-    eps = [json.loads(l) for l in open(Path(a.anchor_run) / "episodes.jsonl")]
-    rows = defaultdict(list)
-    for l in map(json.loads, open(a.anchor_labels)):
-        if "swap_of" not in l:
-            rows[l["episode"]].append(l)
+
+    def episodes(run, labels):
+        eps = [json.loads(l) for l in open(Path(run) / "episodes.jsonl")]
+        rows = defaultdict(list)
+        for l in map(json.loads, open(labels)):
+            if "swap_of" not in l:
+                rows[l["episode"]].append(l)
+        out = []
+        for i, e in enumerate(eps):
+            start = {o: np.array(rows[i][0][f"{o}_pos"]) for o in OBJ}
+            end = {o: np.array((e.get("final_pos") or rows[i][-1])[f"{o}_pos"]) for o in OBJ}
+            out.append((e, start, end))
+        return out
+
     pts = defaultdict(list)
-    for i, e in enumerate(eps):
-        if e["success"] and e["goal"] in DEST and DEST[e["goal"]] not in MOVABLE_DEST:
-            o, p = moved_object(rows[i])
-            if p is not None:
-                pts[DEST[e["goal"]]].append(p)
+    for e, _, end in episodes(a.anchor_run, a.anchor_labels):
+        g = e["goal"]
+        if e["success"] and g.startswith("s") and g in DEST and DEST[g] not in MOVABLE_DEST:
+            pts[DEST[g]].append(next(v for o, v in end.items() if o.startswith(TARGET[g])))
     anchor = {k: np.mean(v, 0) for k, v in pts.items()}
     print("anchors (successful seen episodes): " + ", ".join(f"{k} n={len(pts[k])}" for k in anchor))
     for d in a.runs:
         if not (Path(d) / "episodes.jsonl").exists():
             print(f"{Path(d).name:<16} not finished")
             continue
-        eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
-        rows = defaultdict(list)
-        for l in map(json.loads, open(Path(d) / "labels.jsonl")):
-            if "swap_of" not in l:
-                rows[l["episode"]].append(l)
-        for goal in dict.fromkeys(e["goal"] for e in eps):
+        eps = episodes(d, Path(d) / "labels.jsonl")
+        print(f"{Path(d).name}: {'final state' if eps and 'final_pos' in eps[0][0] else 'last-decision position'}")
+        for goal in dict.fromkeys(e["goal"] for e, _, _ in eps):
             if goal not in DEST or (a.goals and goal not in a.goals.split(",")):
                 continue
-            where, own = Counter(), []
-            for i in (i for i, e in enumerate(eps) if e["goal"] == goal):
-                o, p = moved_object(rows[i])
-                if p is None:
+            where, tgt = Counter(), []
+            for e, start, end in (x for x in eps if x[0]["goal"] == goal):
+                dests = lambda o: {**anchor, **{k: end[m] for k, m in MOVABLE_DEST.items() if not m.startswith(o)}}
+                t = next(o for o in OBJ if o.startswith(TARGET[goal]))
+                tgt.append(np.linalg.norm(end[t] - dests(TARGET[goal])[DEST[goal]]))
+                o, m = max(((o, np.linalg.norm(end[o] - start[o])) for o in OBJ), key=lambda kv: kv[1])
+                if m <= 0.05:
                     where["none"] += 1
                     continue
-                last = rows[i][-1]
-                dist = {k: np.linalg.norm(p - v) for k, v in anchor.items()}
-                dist.update({k: np.linalg.norm(p - np.array(last[f"{m}_pos"])) for k, m in MOVABLE_DEST.items()
-                             if not m.startswith(o)})
-                k, m = min(dist.items(), key=lambda kv: kv[1])
-                where[f"{o}->{k if m < 0.12 else 'elsewhere'}"] += 1
-                if DEST[goal] in dist:
-                    own.append(dist[DEST[goal]])
-            med = f"{np.median(own) * 100:.0f} cm" if own else "-"
-            print(f"{Path(d).name:<16} {goal} ({DEST[goal]:<11}) median to own destination {med:>6}  {dict(where)}")
-
-
-def patch_report(a) -> None:
-    """One line per patch run: requested-goal success, donor goal completed, object moved > 5 cm."""
-    from collections import Counter
-    from pathlib import Path
-    for d in a.runs:
-        if not (Path(d) / "episodes.jsonl").exists():
-            print(f"{Path(d).name:<16} not finished")
-            continue
-        cfg = json.load(open(Path(d) / "run_config.json"))
-        eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
-        L = [json.loads(l) for l in open(Path(d) / "labels.jsonl")]
-        donors = dict(kv.split("=") for kv in cfg.get("env", {}).get("LV_PATCH", "").split(",") if kv)
-        for goal in dict.fromkeys(e["goal"] for e in eps):
-            idx = [i for i, e in enumerate(eps) if e["goal"] == goal]
-            moved = Counter()
-            for i in idx:
-                moved[moved_object([l for l in L if l["episode"] == i])[0]] += 1
-            b = donors.get(goal)
-            don = sum(b in eps[i]["completed_other"] for i in idx) if b else 0
-            print(f"{Path(d).name:<16} {goal}<-{b or '-':<3} success {sum(eps[i]['success'] for i in idx)}/{len(idx)}"
-                  f"  donor goal done {don}/{len(idx)}  moved {dict(moved)}")
+                k, dk = min(((k, np.linalg.norm(end[o] - v)) for k, v in dests(o.split("_")[0]).items()),
+                            key=lambda kv: kv[1])
+                where[f"{o.split('_')[0]}->{k if dk < 0.12 else 'elsewhere'}"] += 1
+            print(f"  {goal} {TARGET[goal]}->{DEST[goal]:<11} target median {np.median(tgt) * 100:4.0f} cm"
+                  f" (<12 cm {sum(x < 0.12 for x in tgt)}/{len(tgt)})  moved: {dict(where)}")
 
 
 def main() -> None:
@@ -483,6 +480,7 @@ def main() -> None:
     sp.add_argument("--run_dir", required=True)
     sp.add_argument("--out", required=True)
     sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--exclude", default="", help="comma-separated goals left out of fitting (held-out combinations)")
     al = sub.add_parser("alphas")
     al.add_argument("--rec", required=True)
     al.add_argument("--labels", required=True)

@@ -20,6 +20,8 @@ import time
 from collections import Counter
 from pathlib import Path
 
+import numpy as np
+
 from langeval.branch import rollout, settle
 from langeval.goal_matrix import GoalTracker
 from langeval.goal_predicates import load_goals, load_novel_goals, satisfied
@@ -83,7 +85,10 @@ def main() -> None:
                 "executed": names[gi] if success else (names[others[0][1]] if others else None),
                 "completed_other": {names[i]: t for t, i in others},
                 "first_satisfied": {names[i]: t for i, t in tracker.first_satisfied.items()},
-                "steps": r["steps"], "error": r["error"]}) + "\n")
+                "steps": r["steps"], "error": r["error"],
+                "final_satisfied": [names[i] for i, v in enumerate(tracker.last) if v],
+                "final_pos": {k: np.asarray(v).tolist() for k, v in (r["obs"] or {}).items() if k.endswith("pos")}})
+                + "\n")
             episodes.flush()
         env.close()
     episodes.close()
