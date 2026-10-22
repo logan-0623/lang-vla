@@ -342,6 +342,9 @@ def patch_report(a) -> None:
     from collections import Counter
     from pathlib import Path
     for d in a.runs:
+        if not (Path(d) / "episodes.jsonl").exists():
+            print(f"{Path(d).name:<16} not finished")
+            continue
         cfg = json.load(open(Path(d) / "run_config.json"))
         eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
         L = [json.loads(l) for l in open(Path(d) / "labels.jsonl")]
