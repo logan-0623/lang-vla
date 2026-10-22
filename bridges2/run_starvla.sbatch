@@ -13,10 +13,12 @@
 set -euo pipefail
 source "${LANGVLA_ROOT:-$SLURM_SUBMIT_DIR}/bridges2/config.sh"
 SRC=$STORE/src/starVLA
-PORT=$((20000 + SLURM_JOB_ID % 20000))
 nvidia-smi -L
 
 conda activate "$STORE/envs/starvla"
+# A port the OS reports free: shared GPU nodes run other users' jobs, and a fixed job-id port once collided
+# (49559598, "address already in use"); the readiness probe below would then have found the other process.
+PORT=$(python -c "import socket; s = socket.socket(); s.bind(('', 0)); print(s.getsockname()[1])")
 ( cd "$SRC" && PYTHONPATH=$SRC python ${SV_WRAP:-} deployment/model_server/server_policy.py --ckpt_path "${SV_CKPT:?}" \
     --port "$PORT" --use_bf16 --seed 7 --idle_timeout -1 \
     --config_override framework.qwenvl.attn_implementation=sdpa ) > "logs/starvla-server-$SLURM_JOB_ID.log" 2>&1 &

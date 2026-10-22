@@ -19,6 +19,10 @@ if [ "${1:-}" = report ]; then
   done
   exit
 fi
+if [ "${1:-}" = retry ]; then      # bash bridges2/batch_1022.sh retry geom: resubmit one failed run, alpha from alphas.json
+  rm -rf $E/$2-matched
+  RUNS="$2:$(python -c "import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])" $E/alphas.json $2)"
+else
 [ -f $E/erasers.npz ] || { echo "missing $E/erasers.npz (batch_1021)" >&2; exit 1; }
 for c in eef dist geom grip; do [ -e $E/$c-matched ] && { echo "$E/$c-matched exists" >&2; exit 1; }; done
 # CPU steps on this login node first (no SU); any failure stops the script before anything is submitted.
@@ -27,6 +31,7 @@ python scripts/erase_action.py binding --rec $E/rec.f16 --labels $E/rec.jsonl --
 echo "dose calibration with the served erasers:"
 python scripts/erase_action.py alphas --rec $E/rec.f16 --labels $E/rec.jsonl --run_config $E/none/run_config.json \
   --erasers $E/erasers.npz --out $E/alphas.json | tee logs/er-alphas.txt
+fi
 RUNS=${RUNS:-$(python -c "import json,sys; print(' '.join(f'{c}:{a}' for c, a in json.load(open(sys.argv[1])).items()))" $E/alphas.json)}
 sub() { local id; id=$(sbatch --parsable "$@"); echo "$id $*" | cut -c1-200 >> logs/batch_1022.txt; echo "$id"; }
 for r in $RUNS; do
