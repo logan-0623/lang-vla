@@ -9,6 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source bridges2/config.sh
 E=$RESULTS/erase
+[ -e $E/patch/subspaces2.npz ] && { echo "$E/patch/subspaces2.npz exists; move it away first" >&2; exit 1; }
 RUNS="$(ls -d $E/patch/*-a $E/patch/*-b $E/patch2/* | tr '\n' ' ')"
 sbatch -t 0:40:00 -J er-diag --export=ALL,ENV=vla bridges2/run.sbatch bash -c "
   python -m pytest -q tests/test_qa_and_adapters.py &&
