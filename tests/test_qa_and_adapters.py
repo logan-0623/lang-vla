@@ -239,6 +239,18 @@ def test_nearest_seen_ignores_the_shared_observation_and_itself():
     assert near["n0"] == "s1" and near["s1"] != "s1"
 
 
+def test_contrast_basis_drops_the_shared_direction():
+    spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
+    ea = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ea)
+    rng = np.random.default_rng(0)
+    e = np.eye(20)
+    shared, own = rng.standard_normal((500, 1)) * 10, rng.standard_normal((500, 1))   # shared dir 0 dominates both
+    Dp = (shared * e[0] + own * e[1] + rng.standard_normal((500, 20)) * .05)[:, None]
+    Dn = (rng.standard_normal((500, 1)) * 10 * e[0] + rng.standard_normal((500, 20)) * .05)[:, None]
+    assert abs(ea.top_basis(Dp, 1)[0, 0, 0]) > .99 and abs(ea.contrast_basis(Dp, Dn, 1)[0, 1, 0]) > .99
+
+
 def test_starvla_client_sends_donor_as_second_example():
     sent = {}
 
