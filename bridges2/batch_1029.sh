@@ -6,6 +6,8 @@
 #   bash bridges2/batch_1029.sh traj      1 job: batch_1027 full-C again (cheese / wine -> cabinet top) with eef paths
 #   bash bridges2/batch_1029.sh objword   3 jobs on the batch_1026 states: the object word replaced (it / the object /
 #                                         a shorter name), destination word kept
+#   bash bridges2/batch_1029.sh nonce     2 jobs on the batch_1027 bowl states: "on the blicket" (all), "on the dax" (n5)
+#   bash bridges2/batch_1029.sh attn      1 job: attention dumps with text -> image rows (n3, n4 states)
 #   bash bridges2/batch_1029.sh report
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -48,8 +50,26 @@ case ${1:-} in
       [ -e $D/obj-$c ] && { echo "$D/obj-$c exists; skipped" >&2; continue; }
       log "$(run br4-obj-$c LV_PATCH_U= scripts/patch_branch.py branch --states $S --out $D/obj-$c --lang "$l")" obj-$c
     done ;;
+  nonce)
+    B=$RESULTS/erase/branch/bowl
+    [ -f $B/states.jsonl ] || { echo "no $B: batch_1027 collect first" >&2; exit 1; }
+    for spec in "bowl-blicket||put the bowl on the blicket" "bowl-dax-on|n5|put the bowl on the dax"; do
+      IFS='|' read -r c g l <<< "$spec"
+      [ -e $D/$c ] && { echo "$D/$c exists; skipped" >&2; continue; }
+      lang="s4=$l;s8=$l;n5=$l"
+      log "$(run br4-$c LV_PATCH_U= scripts/patch_branch.py branch --states $B --out $D/$c --lang "$lang" \
+        ${g:+--goals $g})" $c
+    done ;;
+  attn)
+    [ -e $D/attn-wine2 ] && { echo "$D/attn-wine2 exists" >&2; exit 1; }
+    log "$(run br4-attn-wine2 LV_PATCH_U=,LV_ATTN=$D/attn-wine2.dumps scripts/patch_branch.py probe --states $S \
+      --goals n3,n4 --n_per_goal 5 --out $D/attn-wine2 --instr 'own;s8;s1;put it on the plate')" attn-wine2 ;;
   report)
-    python scripts/patch_branch.py report $(ls -d $D/*/ | grep -v keys)
-    [ -f $D/keys/episodes.jsonl ] && python scripts/patch_branch.py moved $D/keys ;;
-  *) echo "usage: $0 collect | shift | keys | traj | objword | report" >&2; exit 1 ;;
+    python scripts/patch_branch.py report $(ls -d $D/*/ | grep -v -e keys -e attn)
+    [ -f $D/keys/episodes.jsonl ] && python scripts/patch_branch.py moved $D/keys
+    if [ -f $D/attn-wine2/probe.jsonl ]; then
+      python scripts/patch_branch.py attn $D/attn-wine2 --dumps $D/attn-wine2.dumps --png $D/fig-wine2-wine --word wine
+      python scripts/patch_branch.py attn $D/attn-wine2 --dumps $D/attn-wine2.dumps --png $D/fig-wine2-plate --word plate
+    fi ;;
+  *) echo "usage: $0 collect | shift | keys | traj | objword | nonce | attn | report" >&2; exit 1 ;;
 esac

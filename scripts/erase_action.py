@@ -133,7 +133,10 @@ def attention_dumps(out: str, n_max: int) -> None:
         for b in range(ids.shape[0]):
             pos = (ids[b] == act).nonzero().flatten()[-8:]
             att = torch.stack([a[b][:, pos].float().mean(0) for a in res.attentions])        # [layers, 8, L]
+            t0 = int((ids[b] == tok.convert_tokens_to_ids("<|image_pad|>")).nonzero().max()) + 1
+            att_text = torch.stack([a[b][:, t0:pos[0]].float().mean(0) for a in res.attentions])  # text -> all
             np.savez_compressed(f"{out}/call{st['n']:05d}_{b}.npz", att=att.cpu().numpy().astype(np.float16),
+                                att_text=att_text.cpu().numpy().astype(np.float16), text_start=t0,
                                 tokens=np.array(tok.convert_ids_to_tokens(ids[b].tolist())),
                                 grid=grid[b * per:(b + 1) * per], merge=self.processor.image_processor.merge_size,
                                 imgs=st["imgs"][b])

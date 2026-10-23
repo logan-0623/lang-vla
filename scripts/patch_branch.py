@@ -8,7 +8,7 @@ placement, and does the robot keep the right object?
             LV_PATCH_U plus the client's LV_PATCH donor map (scripts/erase_action.py, langeval/adapters/starvla.py):
             one condition per job, all from the same states. Run `none` with the same donor map as the patches.
   report  : success, post-grasp outcome (langeval.phase.classify_outcome) and donor goal completed, per run and goal;
-            where the held target ended (every on/in destination of any goal) and whether another object was touched.
+            where the held target ended (every on/in destination of any goal) and whether another object was grasped (other_grasped: the grasp check, not contact).
             --lang on branch continues with another instruction (parse_lang).
   probe   : one call per (state, instruction), nothing executed, for the server's LV_ATTN attention dumps; `attn`
             reads them (camera / instruction shares, token weights, image overlays).
@@ -125,34 +125,69 @@ def attn(args) -> None:
         tw = tw / max(tw.sum(), 1e-12)
         print(f"{g} [{ins}] n={len(xs)}  {sh[0]:.2f} / {sh[1]:.2f} / {sh[2]:.3f} / {1 - sh.sum():.2f}")
         print("    " + " ".join(f"{t.strip() or '_'}:{v:.2f}" for t, v in zip(toks, tw)))
-        if args.png:
-            try:
-                import matplotlib
-                matplotlib.use("Agg")
-                import matplotlib.pyplot as plt
-            except ImportError:
-                print("no matplotlib: text only")
-                args.png = None
-                continue
-            fig, ax = plt.subplots(1, 3, figsize=(13, 4), gridspec_kw={"width_ratios": [1, 1, 1.4]})
+    if args.png:
+        per_state_figures(args, rows, files, a, b)
+
+
+def per_state_figures(args, rows, files, a, b) -> None:
+    """One figure per probed state: one row per instruction (same observation), overlays on that state's own
+    images, one colour scale per camera for the whole figure (rows are comparable, figures are not). With --word,
+    a last column shows that instruction token's attention to the agentview patches (dumps with att_text only)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from collections import defaultdict
+    states = defaultdict(list)
+    for r, f in zip(rows, files):
+        states[(r["goal"], r["init"])].append((r, np.load(f)))
+    out = Path(args.png)
+    out.mkdir(parents=True, exist_ok=True)
+    for (g, init), xs in states.items():
+        heats, texts, words = [], [], []
+        for r, z in xs:
+            sp = attn_split(list(z["tokens"]), z["grid"], int(z["merge"]))
+            w = z["att"][a:b].astype(np.float32).mean((0, 1))
+            m = int(z["merge"])
+            heats.append([w[sp["images"][c]].reshape(z["grid"][c][1] // m, z["grid"][c][2] // m) for c in range(2)])
+            toks = [z["tokens"][i].replace("\u0120", " ").strip() or "_" for i in sp["instr"]]
+            tw = w[sp["instr"]]
+            texts.append((toks, tw / max(tw.sum(), 1e-12)))
+            hit = None
+            if args.word and "att_text" in z and args.word in toks:
+                k = sp["instr"][toks.index(args.word)] - int(z["text_start"])            # row in att_text
+                ww = z["att_text"][a:b, k].astype(np.float32).mean(0)
+                hit = ww[sp["images"][0]].reshape(z["grid"][0][1] // m, z["grid"][0][2] // m)
+            words.append(hit)
+        vmax = [max(h[c].max() for h in heats) for c in range(2)]
+        wmax = max([h.max() for h in words if h is not None], default=None)
+        ncol = 4 if wmax is not None else 3
+        fig, ax = plt.subplots(len(xs), ncol, figsize=(4.2 * ncol, 3.4 * len(xs)), squeeze=False)
+        for i, ((r, z), h, (toks, tw), wh) in enumerate(zip(xs, heats, texts, words)):
             for c in range(2):
-                t, h, wd = z0["grid"][c]
-                m = int(z0["merge"])
-                heat = np.mean([w[sp["images"][c]] for w, sp, _ in xs], 0).reshape(h // m, wd // m)
-                img = z0["imgs"][c]
-                ax[c].imshow(img)
-                ax[c].imshow(heat, cmap="magma", alpha=0.55, extent=(0, img.shape[1], img.shape[0], 0))
-                ax[c].set_title(["agentview", "wrist"][c] + f"  {sh[c]:.2f}")
-                ax[c].axis("off")
-            ax[2].barh(range(len(toks)), tw, color="tab:orange")
-            ax[2].set_yticks(range(len(toks)), [t.strip() or "_" for t in toks])
-            ax[2].invert_yaxis()
-            ax[2].set_title(f"instruction tokens (share {sh[2]:.3f})")
-            fig.suptitle(f"{g} [{ins}]  layers {args.layers}  n={len(xs)}")
-            Path(args.png).mkdir(parents=True, exist_ok=True)
-            fig.savefig(Path(args.png) / f"{g}_{ins.replace(' ', '_')[:40] or 'empty'}.png", dpi=110,
-                        bbox_inches="tight")
-            plt.close(fig)
+                img = z["imgs"][c]
+                ax[i, c].imshow(img)
+                im = ax[i, c].imshow(h[c], cmap="magma", alpha=0.55, vmin=0, vmax=vmax[c],
+                                     extent=(0, img.shape[1], img.shape[0], 0))
+                ax[i, c].set_title(f"{['agentview', 'wrist'][c]}  sum {h[c].sum():.3f}", fontsize=9)
+                ax[i, c].axis("off")
+                if i == 0:
+                    fig.colorbar(im, ax=ax[:, c], shrink=0.5, label="action-token attention (shared scale)")
+            ax[i, 2].barh(range(len(toks)), tw, color="tab:orange")
+            ax[i, 2].set_yticks(range(len(toks)), toks, fontsize=8)
+            ax[i, 2].invert_yaxis()
+            ax[i, 2].set_xlim(0, 1)
+            ax[i, 2].set_title(f"[{r['instr'] or 'empty'}] text share (incl. prompt template)", fontsize=9)
+            if ncol == 4:
+                ax[i, 3].axis("off")
+                if wh is not None:
+                    ax[i, 3].imshow(z["imgs"][0])
+                    ax[i, 3].imshow(wh, cmap="viridis", alpha=0.55, vmin=0, vmax=wmax,
+                                    extent=(0, z["imgs"][0].shape[1], z["imgs"][0].shape[0], 0))
+                    ax[i, 3].set_title(f"'{args.word}' -> agentview", fontsize=9)
+        fig.suptitle(f"{g} init {init}  layers {args.layers}  (same observation in every row)")
+        fig.savefig(out / f"{g}_init{init}.png", dpi=100, bbox_inches="tight")
+        plt.close(fig)
+    print(f"{len(states)} figures in {out}")
 
 
 def norms(args) -> None:
@@ -314,7 +349,7 @@ def report(args) -> None:
                 end = Counter(d for e in es for d in e["target_on_end"])
                 ever = Counter(d for e in es for d in e["target_on_ever"])
                 print(f"           target on (end) {dict(end.most_common())}  (ever) {dict(ever.most_common())}  "
-                      f"touched another object {sum(e['other_grasped'] for e in es)}")
+                      f"grasped another object {sum(e['other_grasped'] for e in es)}")
             if es[0].get("shift"):
                 # where the held target ended: near the moved object's new place, or where it used to be (6 cm, xy)
                 t = es[0]["target"]
@@ -358,7 +393,8 @@ def main() -> None:
     at.add_argument("run", help="the probe run (probe.jsonl)")
     at.add_argument("--dumps", required=True, help="the server's LV_ATTN directory")
     at.add_argument("--layers", default="-8:", help="python slice over layers, e.g. -8: or 0:12")
-    at.add_argument("--png", default=None, help="write one figure per (goal, instruction) here")
+    at.add_argument("--png", default=None, help="write one figure per probed state here")
+    at.add_argument("--word", default=None, help="also plot this instruction token's attention to the agentview")
     nm = sub.add_parser("norms")
     nm.add_argument("--rec", required=True)
     nm.add_argument("--subspaces", required=True)
