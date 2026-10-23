@@ -204,14 +204,15 @@ def collect(args) -> None:
 
 
 def branch(args) -> None:
-    from langeval.branch import restore, rollout, same_obs
+    from langeval.branch import restore, rollout, same_obs, shift_object
     from langeval.goal_matrix import GoalTracker
     from langeval.goal_predicates import satisfied
     from langeval.phase import classify_outcome, is_grasped, movable_objects, object_z, path_length
     policy, make_env, get_init_states, max_steps, suite, goals, names = setup(args)
     sdir, out = Path(args.states), Path(args.out)
     config(args, out, max_steps=max_steps, goal_names=names)
-    states = [json.loads(l) for l in open(sdir / "states.jsonl")]
+    states = [json.loads(l) for l in open(sdir / "states.jsonl")
+              if not args.goals or json.loads(l)["goal"] in args.goals.split(",")]
     lang = parse_lang(args.lang, goals, names)
     if lang and os.environ.get("LV_PATCH"):
         raise SystemExit("--lang with LV_PATCH: the client finds donors by the goal's own instruction text")
@@ -243,6 +244,15 @@ def branch(args) -> None:
             tracker.update(sat, t)
             return sat[gi]                                       # LIBERO done, as in eval_goals
         obs = restore(env, snap)
+        shift = None
+        if args.shift:
+            name, d = args.shift.split(":")
+            before = np.asarray(obs[f"{name}_pos"], float)
+            obs = shift_object(env, name, [float(x) for x in d.split(",")])
+            after = np.asarray(obs[f"{name}_pos"], float)
+            clear = min(np.linalg.norm((np.asarray(obs[f"{o}_pos"]) - after)[:2])
+                        for o in movable_objects(env) if o not in (name, target))      # the held target moves anyway
+            shift = {"object": name, "before": before.tolist(), "after": after.tolist(), "clearance_xy": clear}
         r = rollout(env, policy, lang.get(s["goal"], goals[gi].language), obs, steps=max_steps - s["grasp_step"],
                     on_step=on_step)
         success = r["error"] is None and tracker.last[gi]
@@ -253,7 +263,9 @@ def branch(args) -> None:
             eef_path_end=path_length(eef[-args.stall_window:]))
         eps.write(json.dumps({
             "goal": s["goal"], "init": s["init"], "state": s["path"], "success": success, "outcome": outcome,
-            "lang": lang.get(s["goal"], goals[gi].language), "other_grasped": other_grasped[0],
+            "lang": lang.get(s["goal"], goals[gi].language), "target": target, "other_grasped": other_grasped[0],
+            "shift": shift,
+            "eef_path": np.round(np.asarray(eef[::5]), 4).tolist(),
             "target_on_end": [p[2] for p in places if env.env._eval_predicate(p)], "target_on_ever": on_ever,
             "executed": None if executed is None else names[executed],
             "completed_other": {names[i]: t for i, t in tracker.completed.items() if i != gi},
@@ -262,6 +274,24 @@ def branch(args) -> None:
             "steps": r["steps"], "error": r["error"]}) + "\n")
         eps.flush()
     env.close()
+
+
+def moved(args) -> None:
+    """For an eval_goals run (start_pos / final_pos per episode): per goal, the executed goal and which object moved
+    most (> 5 cm, else none) - for the key probes, which never succeed by construction."""
+    for d in args.runs:
+        eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
+        print(Path(d).name)
+        for g in dict.fromkeys(e["goal"] for e in eps):
+            es = [e for e in eps if e["goal"] == g]
+            mv = Counter()
+            for e in es:
+                objs = [k for k in e["start_pos"] if k in e["final_pos"] and not k.startswith("robot")]
+                k, m = max(((k, np.linalg.norm(np.subtract(e["final_pos"][k], e["start_pos"][k]))) for k in objs),
+                           key=lambda kv: kv[1])
+                mv[k[:-4] if m > 0.05 else "none"] += 1
+            print(f"  {g:<3} {es[0]['language']!r:<45} executed {dict(Counter(str(e['executed']) for e in es).most_common())}"
+                  f"  moved {dict(mv.most_common())}")
 
 
 def report(args) -> None:
@@ -285,6 +315,15 @@ def report(args) -> None:
                 ever = Counter(d for e in es for d in e["target_on_ever"])
                 print(f"           target on (end) {dict(end.most_common())}  (ever) {dict(ever.most_common())}  "
                       f"touched another object {sum(e['other_grasped'] for e in es)}")
+            if es[0].get("shift"):
+                # where the held target ended: near the moved object's new place, or where it used to be (6 cm, xy)
+                t = es[0]["target"]
+                near = lambda e, k: np.linalg.norm((np.asarray(e["final_pos"][f"{t}_pos"]) -
+                                                    np.asarray(e["shift"][k]))[:2]) < 0.06
+                print(f"           shift {es[0]['shift']['object']}: {t} near new place {sum(near(e, 'after') for e in es)}"
+                      f"  near old place {sum(near(e, 'before') for e in es)}  min clearance "
+                      f"{min(e['shift']['clearance_xy'] for e in es) * 100:.0f} cm  moved object displaced > 3 cm "
+                      f"{sum(np.linalg.norm(np.subtract(e['final_pos'][e['shift']['object'] + '_pos'], e['shift']['after'])) > 0.03 for e in es)}")
 
 
 def main() -> None:
@@ -307,7 +346,9 @@ def main() -> None:
     b = sub.choices["branch"]
     b.add_argument("--states", required=True)
     b.add_argument("--stall_window", type=int, default=30)
+    b.add_argument("--goals", default="", help="only the states of these goals")
     b.add_argument("--lang", default="", help="instruction overrides, see parse_lang")
+    b.add_argument("--shift", default="", help="obj:dx,dy  move a free object after the restore, e.g. plate_1:0,0.1")
     pr = sub.choices["probe"]
     pr.add_argument("--states", required=True)
     pr.add_argument("--goals", required=True)
@@ -322,10 +363,12 @@ def main() -> None:
     nm.add_argument("--rec", required=True)
     nm.add_argument("--subspaces", required=True)
     nm.add_argument("--conds", default="dest:4,random:4,dest_c:16,random:16,dest_c:64,random:64")
+    mo = sub.add_parser("moved")
+    mo.add_argument("runs", nargs="+")
     r = sub.add_parser("report")
     r.add_argument("runs", nargs="+")
     a = ap.parse_args()
-    {"collect": collect, "branch": branch, "probe": probe, "attn": attn, "norms": norms, "report": report}[a.cmd](a)
+    {"collect": collect, "branch": branch, "probe": probe, "attn": attn, "norms": norms, "moved": moved, "report": report}[a.cmd](a)
 
 
 if __name__ == "__main__":

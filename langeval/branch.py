@@ -60,6 +60,21 @@ def restore(env, snap) -> dict:
     return obs
 
 
+def shift_object(env, name: str, d) -> dict:
+    """Move a free object by d = (dx, dy[, dz]) metres in the current state (zero velocity) and return a fresh
+    observation. Run on a restored state, before any step; the caller checks clearance (nothing is resolved here)."""
+    sim = env.env.sim
+    j = f"{name}_joint0"
+    if j not in sim.model.joint_names:
+        raise ValueError(f"no free joint {j}; joints with {name}: {[n for n in sim.model.joint_names if name in n]}")
+    q = np.array(sim.data.get_joint_qpos(j), float)
+    q[:len(d)] += np.asarray(d, float)
+    sim.data.set_joint_qpos(j, q)
+    sim.data.set_joint_qvel(j, np.zeros(6))
+    sim.forward()
+    return env.env._get_observations(force_update=True)
+
+
 def rollout(env, policy, instruction: str, obs, *, steps: int,
             on_step: Callable[[int, dict], bool] | None = None) -> dict:
     """Run `policy` for up to `steps` env steps from the current state.

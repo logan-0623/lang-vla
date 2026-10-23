@@ -70,6 +70,7 @@ def main() -> None:
         inits = get_init_states(suite, task_id)
         for k in range(min(args.n_init, len(inits))):
             obs = settle(env, inits[k], seed=args.seed * 100_000 + gi * 1000 + k)
+            start_pos = {n: np.asarray(v).tolist() for n, v in obs.items() if n.endswith("pos")}
             tracker = GoalTracker(len(goals), args.hold_steps, prefer=gi)
 
             def on_step(t, o):
@@ -87,6 +88,7 @@ def main() -> None:
                 "first_satisfied": {names[i]: t for i, t in tracker.first_satisfied.items()},
                 "steps": r["steps"], "error": r["error"],
                 "final_satisfied": [names[i] for i, v in enumerate(tracker.last) if v],
+                "start_pos": start_pos,
                 "final_pos": {k: np.asarray(v).tolist() for k, v in (r["obs"] or {}).items() if k.endswith("pos")}})
                 + "\n")
             episodes.flush()

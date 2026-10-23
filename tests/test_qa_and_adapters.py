@@ -273,6 +273,23 @@ def test_patch_branch_lang_override_and_attention_spans():
     assert all(callable(getattr(pb, c)) for c in ("collect", "branch", "probe", "attn", "norms", "report"))
 
 
+def test_probe_goals_never_hold_and_moved_object(tmp_path, capsys):
+    from langeval.goal_predicates import Goal, satisfied
+    env = argparse.Namespace(env=argparse.Namespace(_eval_predicate=lambda p: True))
+    assert satisfied(env, [Goal("probe", [], None), Goal("g", [["on", "a", "b"]], "a")]) == [False, True]
+    spec = importlib.util.spec_from_file_location("pb", Path(__file__).parents[1] / "scripts/patch_branch.py")
+    pb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pb)
+    run = tmp_path / "keys"
+    run.mkdir()
+    e = {"goal": "k1", "language": "put the plate on the bowl", "executed": "s8",
+         "start_pos": {"plate_1_pos": [0, 0, 0], "akita_black_bowl_1_pos": [0, 0, 0], "robot0_eef_pos": [0, 0, 0]},
+         "final_pos": {"plate_1_pos": [0, 0.01, 0], "akita_black_bowl_1_pos": [0.2, 0, 0], "robot0_eef_pos": [1, 1, 1]}}
+    (run / "episodes.jsonl").write_text(json.dumps(e) + "\n")
+    pb.moved(argparse.Namespace(runs=[str(run)]))
+    assert "moved {'akita_black_bowl_1': 1}" in capsys.readouterr().out
+
+
 def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
     ea = importlib.util.module_from_spec(spec)

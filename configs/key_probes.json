@@ -1,0 +1,166 @@
+{
+ "_doc": "RESEARCH_PLAN \u00a711.7 key probes (2026-10-23): the novel goals of configs/novel_goals.json, then probe instructions with no predicates. A probe never succeeds (langeval.goal_predicates.satisfied); read which seen / novel goal it executes and which object moved (start_pos / final_pos).",
+ "goals": [
+  {
+   "id": "n0",
+   "kind": "new_object",
+   "language": "put the cream cheese on the plate",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "n1",
+   "kind": "new_object",
+   "language": "put the cream cheese on the stove",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "n2",
+   "kind": "new_object",
+   "language": "put the cream cheese on top of the cabinet",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "wooden_cabinet_1_top_side"
+    ]
+   ]
+  },
+  {
+   "id": "n3",
+   "kind": "new_object",
+   "language": "put the wine bottle on the plate",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "n4",
+   "kind": "new_object",
+   "language": "put the wine bottle on the stove",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "n5",
+   "kind": "new_object",
+   "language": "put the bowl in front of the stove",
+   "predicates": [
+    [
+     "on",
+     "akita_black_bowl_1",
+     "main_table_stove_front_region"
+    ]
+   ]
+  },
+  {
+   "id": "n6",
+   "kind": "new_composite",
+   "language": "open the top drawer and put the cream cheese inside",
+   "predicates": [
+    [
+     "in",
+     "cream_cheese_1",
+     "wooden_cabinet_1_top_region"
+    ]
+   ]
+  },
+  {
+   "id": "n7",
+   "kind": "new_region",
+   "language": "open the top drawer of the cabinet",
+   "predicates": [
+    [
+     "open",
+     "wooden_cabinet_1_top_region"
+    ]
+   ]
+  },
+  {
+   "id": "n8",
+   "kind": "new_region",
+   "language": "open the bottom drawer of the cabinet",
+   "predicates": [
+    [
+     "open",
+     "wooden_cabinet_1_bottom_region"
+    ]
+   ],
+   "seen_elsewhere": "LIBERO-10 opens/closes bottom drawers in other kitchen scenes"
+  },
+  {
+   "id": "k0",
+   "kind": "shuffled_s8",
+   "language": "plate the on bowl the put",
+   "predicates": []
+  },
+  {
+   "id": "k1",
+   "kind": "role_swap_s8",
+   "language": "put the plate on the bowl",
+   "predicates": []
+  },
+  {
+   "id": "k2",
+   "kind": "nonce_object",
+   "language": "put the dax on the plate",
+   "predicates": []
+  },
+  {
+   "id": "k3",
+   "kind": "nonce_destination",
+   "language": "put the bowl on the dax",
+   "predicates": []
+  },
+  {
+   "id": "k4",
+   "kind": "object_only",
+   "language": "put the bowl",
+   "predicates": []
+  },
+  {
+   "id": "k5",
+   "kind": "destination_only",
+   "language": "put it on the plate",
+   "predicates": []
+  },
+  {
+   "id": "k6",
+   "kind": "shuffled_n0",
+   "language": "plate the on cheese cream the put",
+   "predicates": []
+  },
+  {
+   "id": "k7",
+   "kind": "nonce_destination_cheese",
+   "language": "put the cream cheese on the dax",
+   "predicates": []
+  },
+  {
+   "id": "k8",
+   "kind": "empty",
+   "language": "",
+   "predicates": []
+  }
+ ]
+}

@@ -83,6 +83,7 @@ def load_novel_goals(path: str) -> list[Goal]:
 
 
 def satisfied(env, goals: list[Goal]) -> list[bool]:
-    """Whether each goal's predicates all hold now. `env` is LIBERO's OffScreenRenderEnv."""
+    """Whether each goal's predicates all hold now. `env` is LIBERO's OffScreenRenderEnv. A goal with no predicates
+    (a probe instruction, e.g. configs/key_probes.json) never holds: only the goals it ends up executing count."""
     inner = env.env
-    return [all(inner._eval_predicate(p) for p in g.predicates) for g in goals]
+    return [bool(g.predicates) and all(inner._eval_predicate(p) for p in g.predicates) for g in goals]
