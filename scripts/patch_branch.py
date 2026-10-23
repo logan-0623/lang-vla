@@ -171,7 +171,8 @@ def per_state_figures(args, rows, files, a, b) -> None:
                 ax[i, c].set_title(f"{['agentview', 'wrist'][c]}  sum {h[c].sum():.3f}", fontsize=9)
                 ax[i, c].axis("off")
                 if i == 0:
-                    fig.colorbar(im, ax=ax[:, c], shrink=0.5, label="action-token attention (shared scale)")
+                    fig.colorbar(im, ax=ax[:, c], location="bottom", shrink=0.8, pad=0.02,
+                                 label=f"{['agentview', 'wrist'][c]}: action-token attention (shared in figure)")
             ax[i, 2].barh(range(len(toks)), tw, color="tab:orange")
             ax[i, 2].set_yticks(range(len(toks)), toks, fontsize=8)
             ax[i, 2].invert_yaxis()
