@@ -90,8 +90,56 @@ def serve(argv: list[str]) -> None:
         return q
 
     Qwenvl_OFT._gather_action_token_embeddings = hooked
+    if os.environ.get("LV_ATTN"):
+        attention_dumps(os.environ["LV_ATTN"], int(os.environ.get("LV_ATTN_N", "300")))
     sys.argv = argv
     runpy.run_path(argv[0], run_name="__main__")
+
+
+def attention_dumps(out: str, n_max: int) -> None:
+    """LV_ATTN=dir: for the first n_max server calls, the attention of the action tokens to every position, per
+    layer (mean over heads), with tokens, image grids and the input images: dir/call{n}_{row}.npz. Switches the VLM
+    to eager attention (sdpa returns no weights), so actions differ slightly from the sdpa runs: dumps only, no
+    success numbers from these jobs. Read with `scripts/patch_branch.py attn`."""
+    import torch
+    from starVLA.model.modules.vlm.QWen3 import _QWen3_VL_Interface as VL
+    fwd, build = VL.forward, VL.build_qwenvl_inputs
+    os.makedirs(out, exist_ok=True)
+    st = {"n": 0}
+
+    def build_hooked(self, images, instructions, *a, **k):
+        st["imgs"] = [np.stack([np.asarray(i) for i in im]) for im in images]
+        return build(self, images, instructions, *a, **k)
+
+    def fwd_hooked(self, **k):
+        if st["n"] >= n_max:
+            return fwd(self, **k)
+        if "eager" not in st:
+            m = self.model
+            if hasattr(m, "set_attn_implementation"):
+                m.set_attn_implementation("eager")
+            else:
+                for c in (m.config, m.config.text_config):
+                    c._attn_implementation = "eager"
+            st["eager"] = True
+        res = fwd(self, **{**k, "output_attentions": True})
+        if not res.attentions or res.attentions[0] is None:
+            raise SystemExit("LV_ATTN: the model returned no attention weights (eager attention not active)")
+        tok, ids = self.processor.tokenizer, k["input_ids"]
+        act = tok("\U0001F50D", add_special_tokens=False)["input_ids"][0]           # the OFT action token
+        grid = k["image_grid_thw"].cpu().numpy()
+        per = len(grid) // ids.shape[0]
+        for b in range(ids.shape[0]):
+            pos = (ids[b] == act).nonzero().flatten()[-8:]
+            att = torch.stack([a[b][:, pos].float().mean(0) for a in res.attentions])        # [layers, 8, L]
+            np.savez_compressed(f"{out}/call{st['n']:05d}_{b}.npz", att=att.cpu().numpy().astype(np.float16),
+                                tokens=np.array(tok.convert_ids_to_tokens(ids[b].tolist())),
+                                grid=grid[b * per:(b + 1) * per], merge=self.processor.image_processor.merge_size,
+                                imgs=st["imgs"][b])
+        st["n"] += 1
+        return res
+
+    VL.forward, VL.build_qwenvl_inputs = fwd_hooked, build_hooked
 
 
 def load(rec: str, labels: str) -> tuple[np.ndarray, list[dict], dict[str, np.ndarray]]:

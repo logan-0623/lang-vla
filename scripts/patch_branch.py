@@ -7,7 +7,12 @@ placement, and does the robot keep the right object?
   branch  : from every saved state, continue with the goal's own instruction. The condition is the server's
             LV_PATCH_U plus the client's LV_PATCH donor map (scripts/erase_action.py, langeval/adapters/starvla.py):
             one condition per job, all from the same states. Run `none` with the same donor map as the patches.
-  report  : success, post-grasp outcome (langeval.phase.classify_outcome) and donor goal completed, per run and goal.
+  report  : success, post-grasp outcome (langeval.phase.classify_outcome) and donor goal completed, per run and goal;
+            where the held target ended (every on/in destination of any goal) and whether another object was touched.
+            --lang on branch continues with another instruction (parse_lang).
+  probe   : one call per (state, instruction), nothing executed, for the server's LV_ATTN attention dumps; `attn`
+            reads them (camera / instruction shares, token weights, image overlays).
+  norms   : ||U U^T d|| / ||d|| of each patch on the branch states, from a LV_RECORD run with LV_PATCH.
 
   python scripts/patch_branch.py collect --backend starvla --checkpoint SERVER --goals n0,n3,n4 --out $D/states
   LV_PATCH=n0=s8 python scripts/patch_branch.py branch --backend starvla --checkpoint SERVER --states $D/states --out $D/dest
@@ -46,6 +51,124 @@ def config(args, out: Path, **extra) -> None:
         "git_langvla": subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True,
                                       text=True).stdout.strip(),
         "started": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=2))
+
+
+def parse_lang(spec: str, goals, names) -> dict:
+    """--lang "n3=s1;n4=put the wine bottle on the dax;s8=" : the instruction a goal's states continue with, a goal
+    name (that goal's instruction) or literal text (may be empty). Success is still the state's own goal."""
+    out = {}
+    for kv in filter(None, (spec or "").split(";")):
+        g, text = kv.split("=", 1)
+        out[g] = goals[names.index(text)].language if text in names else text
+    return out
+
+
+def probe(args) -> None:
+    """One policy call per (state, instruction), nothing executed: for the server's LV_ATTN attention dumps.
+    --instr is ';'-separated, each a goal name, literal text, or `own` (the state's goal)."""
+    from langeval.branch import restore
+    policy, make_env, get_init_states, max_steps, suite, goals, names = setup(args)
+    if os.environ.get("LV_PATCH"):
+        raise SystemExit("probe sends one instruction per call: unset LV_PATCH")
+    sdir, out = Path(args.states), Path(args.out)
+    config(args, out, goal_names=names)
+    states = [json.loads(l) for l in open(sdir / "states.jsonl")]
+    env, _ = make_env(suite, 0)
+    log = open(out / "probe.jsonl", "w")
+    for s in [s for g in args.goals.split(",") for s in [x for x in states if x["goal"] == g][:args.n_per_goal]]:
+        z = np.load(sdir / s["path"])
+        obs = restore(env, {k: z[k] for k in ("state", "body_pos", "body_quat", "gripper")})
+        for name in args.instr.split(";"):
+            key = s["goal"] if name == "own" else name
+            text = goals[names.index(key)].language if key in names else name
+            policy.act(obs, text)
+            log.write(json.dumps({"goal": s["goal"], "init": s["init"], "instr": name, "lang": text}) + "\n")
+            log.flush()
+    env.close()
+
+
+def attn_split(tokens, grid, merge: int) -> dict:
+    """Positions of each image's tokens and of the instruction (between the last image and the OFT prompt suffix)."""
+    img = [i for i, t in enumerate(tokens) if t == "<|image_pad|>"]
+    sizes = [int(np.prod(g)) // merge ** 2 for g in grid]
+    assert sum(sizes) == len(img), f"{len(img)} image tokens vs grid {grid.tolist()}"
+    cut = np.cumsum([0] + sizes)
+    start = img[-1] + 2                                          # skip <|vision_end|>
+    end = next(i for i in range(start, len(tokens)) if tokens[i].lstrip("\u0120") == "Please")
+    return {"images": [img[a:b] for a, b in zip(cut[:-1], cut[1:])], "instr": list(range(start, end))}
+
+
+def attn(args) -> None:
+    """Attention of the action tokens (mean over the 8 tokens and over --layers) from the server's LV_ATTN dumps of
+    a probe run: share on each camera's image tokens / the instruction / the rest (template, suffix, action tokens),
+    the instruction tokens' weights (text heat map) and, with matplotlib, an image overlay per (goal, instruction).
+    Attention weights are descriptive: where the action tokens read from, not what changes the action."""
+    from collections import defaultdict
+    d = Path(args.run)
+    rows = [json.loads(l) for l in open(d / "probe.jsonl")]
+    files = sorted(Path(args.dumps).glob("call*_0.npz"))
+    assert len(files) == len(rows), f"{len(files)} dumps vs {len(rows)} probe calls: not the same run?"
+    a, b = (int(x) if x else None for x in args.layers.split(":"))
+    groups = defaultdict(list)
+    for r, f in zip(rows, files):
+        z = np.load(f)
+        w = z["att"][a:b].astype(np.float32).mean((0, 1))                     # [L]
+        sp = attn_split(list(z["tokens"]), z["grid"], int(z["merge"]))
+        groups[(r["goal"], r["instr"])].append((w, sp, z))
+    print(f"layers {args.layers}; share of attention: agentview / wrist / instruction / rest")
+    for (g, ins), xs in groups.items():
+        sh = np.mean([[w[sp["images"][0]].sum(), w[sp["images"][1]].sum(), w[sp["instr"]].sum()] for w, sp, _ in xs], 0)
+        w0, sp0, z0 = xs[0]
+        toks = [z0["tokens"][i].replace("\u0120", " ") for i in sp0["instr"]]
+        same = all(len(sp["instr"]) == len(sp0["instr"]) for _, sp, _ in xs)
+        tw = np.mean([w[sp["instr"]] for w, sp, _ in xs], 0) if same else w0[sp0["instr"]]
+        tw = tw / max(tw.sum(), 1e-12)
+        print(f"{g} [{ins}] n={len(xs)}  {sh[0]:.2f} / {sh[1]:.2f} / {sh[2]:.3f} / {1 - sh.sum():.2f}")
+        print("    " + " ".join(f"{t.strip() or '_'}:{v:.2f}" for t, v in zip(toks, tw)))
+        if args.png:
+            try:
+                import matplotlib
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+            except ImportError:
+                print("no matplotlib: text only")
+                args.png = None
+                continue
+            fig, ax = plt.subplots(1, 3, figsize=(13, 4), gridspec_kw={"width_ratios": [1, 1, 1.4]})
+            for c in range(2):
+                t, h, wd = z0["grid"][c]
+                m = int(z0["merge"])
+                heat = np.mean([w[sp["images"][c]] for w, sp, _ in xs], 0).reshape(h // m, wd // m)
+                img = z0["imgs"][c]
+                ax[c].imshow(img)
+                ax[c].imshow(heat, cmap="magma", alpha=0.55, extent=(0, img.shape[1], img.shape[0], 0))
+                ax[c].set_title(["agentview", "wrist"][c] + f"  {sh[c]:.2f}")
+                ax[c].axis("off")
+            ax[2].barh(range(len(toks)), tw, color="tab:orange")
+            ax[2].set_yticks(range(len(toks)), [t.strip() or "_" for t in toks])
+            ax[2].invert_yaxis()
+            ax[2].set_title(f"instruction tokens (share {sh[2]:.3f})")
+            fig.suptitle(f"{g} [{ins}]  layers {args.layers}  n={len(xs)}")
+            Path(args.png).mkdir(parents=True, exist_ok=True)
+            fig.savefig(Path(args.png) / f"{g}_{ins.replace(' ', '_')[:40] or 'empty'}.png", dpi=110,
+                        bbox_inches="tight")
+            plt.close(fig)
+
+
+def norms(args) -> None:
+    """How much of the actual donor difference d = q_B - q_A each patch moves, on the branch states themselves:
+    ||U U^T d|| / ||d|| (median over calls and the 8 tokens) per subspace and rank, from a run recorded with
+    LV_RECORD and LV_PATCH (server rows alternate A, donor B; recorded before any patch)."""
+    shape = json.load(open(args.rec + ".json"))["shape"]
+    X = np.fromfile(args.rec, np.float16).reshape(-1, 2, *shape).astype(np.float32)           # [calls, A/B, 8, H]
+    d = X[:, 1] - X[:, 0]
+    print(f"{len(X)} calls; ||d|| / ||q_A|| median {np.median(np.linalg.norm(d, axis=-1) / np.linalg.norm(X[:, 0], axis=-1)):.2f}")
+    z = np.load(args.subspaces)
+    for c in args.conds.split(","):
+        name, k = c.split(":")
+        U = z[f"{name}.U"][:, :, :int(k)]                                                  # [8, H, k]
+        p = np.einsum("thk,ntk->nth", U, np.einsum("thk,nth->ntk", U, d))                # as the server applies it
+        print(f"  {c:<10} ||UU^T d|| / ||d|| median {np.median(np.linalg.norm(p, axis=-1) / np.linalg.norm(d, axis=-1)):.2f}")
 
 
 def collect(args) -> None:
@@ -89,6 +212,13 @@ def branch(args) -> None:
     sdir, out = Path(args.states), Path(args.out)
     config(args, out, max_steps=max_steps, goal_names=names)
     states = [json.loads(l) for l in open(sdir / "states.jsonl")]
+    lang = parse_lang(args.lang, goals, names)
+    if lang and os.environ.get("LV_PATCH"):
+        raise SystemExit("--lang with LV_PATCH: the client finds donors by the goal's own instruction text")
+    # every place a goal puts an object, to see where the held target ends up (whatever the instruction asked)
+    dests = list({p[2]: [p[0].lower(), p[2]] for g in goals for p in g.predicates
+                  if p[0].lower() in ("on", "in")}.values())
+    dests = [[k, None, d] for k, d in dests]
     env, _ = make_env(suite, 0)
     eps = open(out / "episodes.jsonl", "w")
     for j, s in enumerate(states):
@@ -100,16 +230,21 @@ def branch(args) -> None:
             raise SystemExit("two restores of one state give different observations: restore is broken")
         tracker = GoalTracker(len(goals), args.hold_steps, prefer=gi)
         others = [o for o in movable_objects(env) if o != target]
-        other_grasped, eef = [False], []
+        other_grasped, eef, on_ever = [False], [], {}
+        places = [[p[0], target, p[2]] for p in dests if p[2] != target]
 
         def on_step(t, o):
             eef.append(np.asarray(o["robot0_eef_pos"], float))
             other_grasped[0] |= any(is_grasped(env, n) for n in others)
+            for p in places:
+                if p[2] not in on_ever and env.env._eval_predicate(p):
+                    on_ever[p[2]] = t
             sat = satisfied(env, goals)
             tracker.update(sat, t)
             return sat[gi]                                       # LIBERO done, as in eval_goals
         obs = restore(env, snap)
-        r = rollout(env, policy, goals[gi].language, obs, steps=max_steps - s["grasp_step"], on_step=on_step)
+        r = rollout(env, policy, lang.get(s["goal"], goals[gi].language), obs, steps=max_steps - s["grasp_step"],
+                    on_step=on_step)
         success = r["error"] is None and tracker.last[gi]
         executed = gi if success else tracker.executed
         outcome = "error" if r["error"] else classify_outcome(
@@ -118,6 +253,8 @@ def branch(args) -> None:
             eef_path_end=path_length(eef[-args.stall_window:]))
         eps.write(json.dumps({
             "goal": s["goal"], "init": s["init"], "state": s["path"], "success": success, "outcome": outcome,
+            "lang": lang.get(s["goal"], goals[gi].language), "other_grasped": other_grasped[0],
+            "target_on_end": [p[2] for p in places if env.env._eval_predicate(p)], "target_on_ever": on_ever,
             "executed": None if executed is None else names[executed],
             "completed_other": {names[i]: t for i, t in tracker.completed.items() if i != gi},
             "final_satisfied": [names[i] for i, v in enumerate(tracker.last) if v],
@@ -143,12 +280,17 @@ def report(args) -> None:
             print(f"  {g}<-{b or '-':<3} success {sum(e['success'] for e in es)}/{len(es)}  donor goal done "
                   f"{sum(b in e['completed_other'] for e in es) if b else '-'}  "
                   f"{dict(Counter(e['outcome'] for e in es).most_common())}")
+            if "target_on_end" in es[0]:
+                end = Counter(d for e in es for d in e["target_on_end"])
+                ever = Counter(d for e in es for d in e["target_on_ever"])
+                print(f"           target on (end) {dict(end.most_common())}  (ever) {dict(ever.most_common())}  "
+                      f"touched another object {sum(e['other_grasped'] for e in es)}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for nm in ("collect", "branch"):
+    for nm in ("collect", "branch", "probe"):
         p = sub.add_parser(nm)
         p.add_argument("--checkpoint", required=True)
         p.add_argument("--backend", default="starvla", choices=["upstream", "lerobot", "starvla"])
@@ -165,10 +307,25 @@ def main() -> None:
     b = sub.choices["branch"]
     b.add_argument("--states", required=True)
     b.add_argument("--stall_window", type=int, default=30)
+    b.add_argument("--lang", default="", help="instruction overrides, see parse_lang")
+    pr = sub.choices["probe"]
+    pr.add_argument("--states", required=True)
+    pr.add_argument("--goals", required=True)
+    pr.add_argument("--instr", required=True)
+    pr.add_argument("--n_per_goal", type=int, default=3)
+    at = sub.add_parser("attn")
+    at.add_argument("run", help="the probe run (probe.jsonl)")
+    at.add_argument("--dumps", required=True, help="the server's LV_ATTN directory")
+    at.add_argument("--layers", default="-8:", help="python slice over layers, e.g. -8: or 0:12")
+    at.add_argument("--png", default=None, help="write one figure per (goal, instruction) here")
+    nm = sub.add_parser("norms")
+    nm.add_argument("--rec", required=True)
+    nm.add_argument("--subspaces", required=True)
+    nm.add_argument("--conds", default="dest:4,random:4,dest_c:16,random:16,dest_c:64,random:64")
     r = sub.add_parser("report")
     r.add_argument("runs", nargs="+")
     a = ap.parse_args()
-    {"collect": collect, "branch": branch, "report": report}[a.cmd](a)
+    {"collect": collect, "branch": branch, "probe": probe, "attn": attn, "norms": norms, "report": report}[a.cmd](a)
 
 
 if __name__ == "__main__":

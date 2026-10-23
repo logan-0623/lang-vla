@@ -259,6 +259,20 @@ def test_erase_action_commands_exist():
     assert all(callable(getattr(ea, c, None)) for c in ("fit", "binding", "subspaces", "alphas", "patch_report", "landing"))
 
 
+def test_patch_branch_lang_override_and_attention_spans():
+    spec = importlib.util.spec_from_file_location("pb", Path(__file__).parents[1] / "scripts/patch_branch.py")
+    pb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pb)
+    goals = [argparse.Namespace(language="put the bowl on the stove"), argparse.Namespace(language="x")]
+    assert pb.parse_lang("n3=s1;s8=;n4=put it on the dax", goals, ["s1", "n3"]) == \
+        {"n3": "put the bowl on the stove", "s8": "", "n4": "put it on the dax"}
+    pad = "<|image_pad|>"
+    toks = ["<|im_start|>", pad, pad, pad, pad, pad, "<|vision_end|>", "put", "\u0120the", "\u0120bowl", "\u0120Please"]
+    sp = pb.attn_split(toks, np.array([[1, 4, 4], [1, 2, 2]]), 2)      # 4 tokens, then 1 token
+    assert sp == {"images": [[1, 2, 3, 4], [5]], "instr": [7, 8, 9]}
+    assert all(callable(getattr(pb, c)) for c in ("collect", "branch", "probe", "attn", "norms", "report"))
+
+
 def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
     ea = importlib.util.module_from_spec(spec)
