@@ -57,20 +57,22 @@ class StarVLAPolicy:
         import os
         self.labels = open(os.environ["LV_LABELS"], "a") if os.environ.get("LV_LABELS") else None
         self.swap = list(_goal_languages().values()) if self.labels and os.environ.get("LV_SWAP") else []
-        # LV_PATCH="s4=s2,n2=s6": when the instruction is goal A, the same observation goes to the server as a batch
-        # [A, donor B]; the server (scripts/erase_action.py, LV_PATCH_U) patches A's action queries from B's and
-        # only A's actions are executed (RESEARCH_PLAN §11.7 P0-P3).
+        # LV_PATCH="s4=s2,n2=s6+s6p0": when the instruction is goal A, the same observation goes to the server as a
+        # batch [A, donor B1, B2, ...]; the server (scripts/erase_action.py, LV_PATCH_U) patches A's action queries
+        # toward the donors' mean and only A's actions are executed (RESEARCH_PLAN §11.7). LV_PATCH_EXTRA: a json
+        # {name: instruction} of extra donor names (e.g. paraphrases of a seen instruction).
         gl = _goal_languages() if os.environ.get("LV_PATCH") else {}
+        if os.environ.get("LV_PATCH_EXTRA"):
+            gl.update(json.load(open(os.environ["LV_PATCH_EXTRA"])))
         pairs = [kv.split("=") for kv in os.environ.get("LV_PATCH", "").split(",") if kv]
-        self.patch = {gl[a]: gl[b] for a, b in pairs}
+        self.patch = {gl[a]: [gl[x] for x in b.split("+")] for a, b in pairs}
         self.episode, self.call = -1, 0
 
     def begin(self) -> None:
         self.episode, self.call = self.episode + 1, 0
 
     def _query(self, imgs: list, lang: str) -> np.ndarray:
-        donor = getattr(self, "patch", {}).get(lang)
-        examples = [{"image": imgs, "lang": l} for l in ([lang, donor] if donor else [lang])]
+        examples = [{"image": imgs, "lang": l} for l in [lang, *getattr(self, "patch", {}).get(lang, [])]]
         resp = self.client.predict_action({"examples": examples,
                                            "unnorm_key": self.unnorm_key, "do_sample": False,
                                            "use_ddim": True, "num_ddim_steps": 10})

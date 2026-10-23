@@ -69,7 +69,7 @@ def serve(argv: list[str]) -> None:
             x = q.float() - mu
             proj = torch.einsum("thk,btk->bth", U, torch.einsum("thk,bth->btk", U, x))
             q = (q.float() - state["alpha"] * proj).to(q.dtype)
-        if patch and q.shape[0] == 2:                           # batch [A, donor B] from the client's LV_PATCH
+        if patch and q.shape[0] >= 2:                           # batch [A, donors B...] from the client's LV_PATCH
             if "P" not in state:
                 # path:none | path:full:strength | path:name:rank:strength (subspaces2.npz keeps rank 64: no default)
                 path, name, *opt = patch.split(":")
@@ -80,9 +80,10 @@ def serve(argv: list[str]) -> None:
                     torch.tensor(np.load(path)[f"{name}.U"][:, :, :int(opt[0])], device=q.device)
                 print(f"patching {name} {':'.join(opt)}", flush=True)
             P, q, beta = state["P"], q.clone(), state["beta"]
-            d = q[1].float() - q[0].float()
+            b = q[1:].float().mean(0)                           # several donors: their mean, same observation
+            d = b - q[0].float()
             if P == "full" and beta == 1.0:
-                q[0] = q[1]
+                q[0] = b.to(q.dtype)
             elif isinstance(P, str):
                 q[0] = (q[0].float() + beta * d).to(q.dtype) if P == "full" else q[0]
             else:

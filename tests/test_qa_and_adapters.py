@@ -303,8 +303,11 @@ def test_starvla_client_sends_donor_as_second_example():
 
     p = object.__new__(StarVLAPolicy)
     p.client, p.chunk, p.unnorm_key, p.labels, p.call = Fake(), 2, "franka", None, 0
-    p.patch = {"put the cream cheese on top of the cabinet": "put the cream cheese in the bowl"}
+    p.patch = {"put the cream cheese on top of the cabinet": ["put the cream cheese in the bowl"]}
     img = np.zeros((224, 224, 3), np.uint8)
     acts = p.act({"agentview_image": img, "robot0_eye_in_hand_image": img}, "put the cream cheese on top of the cabinet")
     assert [e["lang"] for e in sent["examples"]] == ["put the cream cheese on top of the cabinet", "put the cream cheese in the bowl"]
     assert acts[0][0] == np.float32(.1)                                    # the requested goal's actions, not the donor's
+    p.patch = {"a": ["b", "c"]}                                            # several donors: all after A, in order
+    p.act({"agentview_image": img, "robot0_eye_in_hand_image": img}, "a")
+    assert [e["lang"] for e in sent["examples"]] == ["a", "b", "c"]

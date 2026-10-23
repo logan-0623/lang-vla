@@ -278,7 +278,7 @@ def report(args) -> None:
             es = [e for e in eps if e["goal"] == g]
             b = donors.get(g)
             print(f"  {g}<-{b or '-':<3} success {sum(e['success'] for e in es)}/{len(es)}  donor goal done "
-                  f"{sum(b in e['completed_other'] for e in es) if b else '-'}  "
+                  f"{sum(any(x in e['completed_other'] for x in b.split('+')) for e in es) if b else '-'}  "
                   f"{dict(Counter(e['outcome'] for e in es).most_common())}")
             if "target_on_end" in es[0]:
                 end = Counter(d for e in es for d in e["target_on_end"])
