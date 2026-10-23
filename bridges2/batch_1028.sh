@@ -18,6 +18,7 @@ mkdir -p $D
 case ${1:-} in
   para)
     [ -e $D/para.json ] && { echo "$D/para.json exists" >&2; exit 1; }
+    set +u; use_env vla; set -u                          # LIBERO_CONFIG_PATH: else importing libero prompts
     python - "$PARA/metrics/libero_para_metadata.csv" $D/para.json <<'EOF'
 import json, random, sys
 from langeval.goal_predicates import load_goals
