@@ -4,6 +4,8 @@
 #   bash bridges2/batch_1029.sh shift     5 jobs from those states: plate moved 0 / +-10 cm in x / y after the grasp
 #   bash bridges2/batch_1029.sh keys      1 job: key probes from the episode start (configs/key_probes.json) + s8, n0
 #   bash bridges2/batch_1029.sh traj      1 job: batch_1027 full-C again (cheese / wine -> cabinet top) with eef paths
+#   bash bridges2/batch_1029.sh objword   3 jobs on the batch_1026 states: the object word replaced (it / the object /
+#                                         a shorter name), destination word kept
 #   bash bridges2/batch_1029.sh report
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -37,8 +39,17 @@ case ${1:-} in
     [ -e $D/full-C ] && { echo "$D/full-C exists" >&2; exit 1; }
     export LV_PATCH=n0=s4,n3=s4,n4=s4      # not in --export: Slurm splits its list on commas
     log "$(run br4-full-C LV_PATCH_U=$U:full:1 scripts/patch_branch.py branch --states $S --out $D/full-C)" full-C ;;
+  objword)
+    [ -f $S/states.jsonl ] || { echo "no $S: batch_1026 collect first" >&2; exit 1; }
+    for spec in "it|n0=put it on the plate;n3=put it on the plate;n4=put it on the stove" \
+                "generic|n0=put the object on the plate;n3=put the object on the plate;n4=put the object on the stove" \
+                "bottle|n0=put the cheese on the plate;n3=put the bottle on the plate;n4=put the bottle on the stove"; do
+      c=${spec%%|*}; l=${spec#*|}
+      [ -e $D/obj-$c ] && { echo "$D/obj-$c exists; skipped" >&2; continue; }
+      log "$(run br4-obj-$c LV_PATCH_U= scripts/patch_branch.py branch --states $S --out $D/obj-$c --lang "$l")" obj-$c
+    done ;;
   report)
     python scripts/patch_branch.py report $(ls -d $D/*/ | grep -v keys)
     [ -f $D/keys/episodes.jsonl ] && python scripts/patch_branch.py moved $D/keys ;;
-  *) echo "usage: $0 collect | shift | keys | traj | report" >&2; exit 1 ;;
+  *) echo "usage: $0 collect | shift | keys | traj | objword | report" >&2; exit 1 ;;
 esac
