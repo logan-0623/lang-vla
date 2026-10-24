@@ -301,7 +301,7 @@ def branch(args) -> None:
             "goal": s["goal"], "init": s["init"], "state": s["path"], "success": success, "outcome": outcome,
             "lang": lang.get(s["goal"], goals[gi].language), "target": target, "other_grasped": other_grasped[0],
             "shift": shift,
-            "eef_path": np.round(np.asarray(eef[::5]), 4).tolist(),
+            "eef_path": np.round(np.asarray(eef[::2]), 4).tolist(),
             "target_on_end": [p[2] for p in places if env.env._eval_predicate(p)], "target_on_ever": on_ever,
             "executed": None if executed is None else names[executed],
             "completed_other": {names[i]: t for i, t in tracker.completed.items() if i != gi},

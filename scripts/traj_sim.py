@@ -72,11 +72,12 @@ def sim(args) -> None:
           + ", ".join(f"{t[:28]} {v * 100:.1f}" for t, v in sorted(typical.items())))
     for d in args.runs:
         eps = [json.loads(l) for l in open(Path(d) / "episodes.jsonl")]
-        eps = [e for e in eps if len(e.get("eef_path") or []) > 5]
+        n_all = len(eps)
+        eps = [e for e in eps if len(e.get("eef_path") or []) >= 3]      # eef_path: every 5th step before 2026-10-23, then every 2nd
         if not eps:
             print(f"{Path(d).name}: no eef_path")
             continue
-        print(Path(d).name)
+        print(f"{Path(d).name}  ({len(eps)}/{n_all} episodes long enough)")
         for g in dict.fromkeys(e["goal"] for e in eps):
             rows = defaultdict(list)
             for e in (e for e in eps if e["goal"] == g):
