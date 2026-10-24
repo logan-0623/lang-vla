@@ -1,7 +1,7 @@
 """RESEARCH_PLAN §11.8 A: does a rollout re-execute a demonstration? (V3; the trajectory-similarity idea of
 ALT, arXiv 2505.05787, adapted to many demos per task.)
 
-Post-grasp end-effector paths of branch runs (scripts/patch_branch.py records eef_path every 5 steps) vs the
+Post-grasp end-effector paths of branch runs (scripts/patch_branch.py records eef_path: every 5th step before 2026-10-23, every 2nd since) vs the
 post-grasp part of every LIBERO-Goal demonstration (LeRobot dataset: observation.state[:3] = eef xyz, same frame as
 robot0_eef_pos; the grasp is the first gripper-close action, the segment starts once the eef has risen 3 cm).
 Both are resampled to N points by arc length; d = mean point distance.

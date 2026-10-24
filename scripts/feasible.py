@@ -1,5 +1,5 @@
 """Is a goal's end state physically stable? For each goal of a goals json and each of --n_init init states: put the
-target object 5 cm above its destination (a region's site, or the destination object), let it fall and settle for
+target object --drop (default 1 cm) above its destination (a region's site, or the destination object), let it fall and settle for
 --steps no-op steps (robot still, gripper open), then check the goal's predicates. End-state feasibility only: it says
 nothing about whether the arm can carry the object there.
 
