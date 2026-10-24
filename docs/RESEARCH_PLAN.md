@@ -156,6 +156,25 @@
 | [Don't Blind Your VLA, 2510.25616v1](https://arxiv.org/abs/2510.25616v1)；[Anchor-Align, 2607.13429v2](https://arxiv.org/abs/2607.13429v2)；[Knowledge Insulation, 2505.23705v1](https://arxiv.org/abs/2505.23705v1)；[APT, 2606.12366v2](https://arxiv.org/abs/2606.12366v2)，摘要筛查 | 表征保留、同观测的语言动作对齐、梯度隔离与动作专家预训练 | 服务于 §11 的迁移问题。能读出坐标不代表预训练知识完整保留，也不能据此直接选择更大的 VLM 或重训动作头 |
 | [SALT, 2608.10484v1](https://arxiv.org/abs/2608.10484v1)；[VLAFlow, 2607.01586v2](https://arxiv.org/abs/2607.01586v2)；[CLAP, 2607.08974v1](https://arxiv.org/abs/2607.08974v1)；[LaRA-VLA, 2602.01166v2](https://arxiv.org/abs/2602.01166v2)；[UP-VLA, 2501.18867v3](https://arxiv.org/abs/2501.18867v3)，摘要筛查 | 动作语义、语言 / 未来状态辅助监督、文本动作计划及隐空间推理 | 是迁移监督的候选参照，不是本轮必须重建的模型清单。需要先证明哪类信息的缺失与闭环失败有关 |
 
+**补充近邻与定位修正（2026-10-24，按一手正文核对；不改 §11.7–§11.8 的原判定）**
+
+| 文献 | 与本项目重合的内容 | 尚能区分的部分 |
+|---|---|---|
+| [Learning What to Say to Your VLA, 2606.12299v2](https://arxiv.org/pdf/2606.12299v2)（CoRL 2026，CMU；v2 2026-10-16） | 冻结 VLA，只改变执行过程中的语言。v2 附录 Fig.10 的名词改写候选明确包含 `it`，Fig.9 给出了"先抓取，再用代词描述放置"的分步示例 | **"冻结 VLA + 抓取后换成代词"不再是新方法。** 它是在交互搜索和学习反馈策略时把代词作为候选，没有单独测出"正确抓稳后只抽象物体名"的净效应和阶段依赖 |
+| [When Instructions Retrieve Trajectories, 2609.39971v1](https://arxiv.org/html/2609.39971v1) | 指令检索熟悉轨迹、内部状态替换 | 同状态实时替换查询、抓稳后恢复原目标，是不同的协议和结局 |
+| [PerturBot, 2610.04616v1](https://arxiv.org/html/2610.04616v1)（π0.5，RoboTwin 2.0） | noun lock-in：熟悉的名词会触发训练时绑定的操作，即使动词已经改变 | "物体词干扰动作"本身已有先例。可区分的是：物体身份的作用是否随抓取阶段改变 |
+| [InstructMove, 2608.22990v1](https://arxiv.org/html/2608.22990v1) | 同场景多个可行候选，用语言区分目标 | 评测原则：换掉物体词以后，机器人仍应随目的地词去不同的目的地，否则可能只是默认去向 |
+| [RoboIRGBench, 2609.34384v1](https://arxiv.org/html/2609.34384v1)；[Hi Robot, 2502.19417v1](https://arxiv.org/html/2502.19417v1) | 前者已经把物体名换成 `it` 等指代；后者按状态重写当前阶段的指令 | 不能声称"首次在 VLA 中使用代词"或"首次按状态重写指令" |
+
+**定位修正：**
+- 贡献的中心从"it 是一种修复方法"改为一个可检验的问题：**物体身份的语言描述，在抓取前后是否起相反作用？** `it` 只作为探针。
+- 现有数据里已经有一组阶段对比，都是事后观察，不是预注册：
+  - 从回合开始就用 "put it on the plate"（k5），19/20 去拿碗，执行 s8。没有物体词时，机器人按目的地键选了默认物体。
+  - 抓稳以后同一句话把奶酪或酒瓶救回（W1）。
+  - 两者合起来，与"物体词抓取前有用、抓取后有害"相容。
+- "检索式机制"降为竞争假设之一：h0/h1 的失败同时涉及目的地区域、关系、训练支持和控制难度，不能唯一证明"需要已训练的放置程序"。
+- `it` 与 `the object` 都有效（33、34/60），所以研究对象应是"物体身份描述的具体程度"，而不是代词本身。
+
 **评测与辅助来源。** [LIBERO-PRO](https://arxiv.org/abs/2510.03827v2)、[LIBERO-Plus](https://arxiv.org/abs/2510.13626v3)、[LangGap](https://arxiv.org/abs/2603.00592v1)、[LIBERO-Para](https://arxiv.org/abs/2603.28301v3) 和 [LIBERO](https://arxiv.org/abs/2306.03310v2) 本次核对摘要与版本。按问题选测试：新组合用 libero-ood / CF / LangGap，措辞鲁棒性用 Para，位置与视觉扰动用 PRO / Plus；不能用数据集“更难”代替同场景竞争指令的设计。
 
 其余来源各有用途，但当前优先级较低：[Flatness](https://arxiv.org/abs/2606.23641v1) 和 [Pion](https://arxiv.org/abs/2605.19282v1) 是优化 / 微调参照；[LabVLA](https://arxiv.org/abs/2606.13578v2) 是实验室应用与训练系统；[Full-Stack Transfer](https://arxiv.org/abs/2602.22001v1) 是综述视角；这些仅做摘要筛查。[Mechanistic Interpretability for Steering](https://arxiv.org/abs/2509.00328v1) 是内部引导先例。[Hitchhiker's Guide](https://aryangoyal7.github.io/publication/2026-hitchhikers-guide) 的官方作者页标为 **ICML 2026 Mechanistic Interpretability Workshop position paper**，不能记为主会实验论文。
@@ -1604,3 +1623,23 @@ ratio 是到最近演示的距离，除以同任务演示之间的典型距离�
 - **代词替换和换成已见指令效果相当：** 差值都是 +0.40，而且代词替换几乎不丢原本成功的状态（1/9）。每个目标单独看，obj-it 的 p 都小于 0.05（n0 0.022，n3 0.031，n4 0.002）。
 - **dest:4 和 random:64 都显著好于基线，但两者之间分不出差别**（+0.15 对 +0.18），和 T3 "效果跟着修补量走" 的观察一致。
 - **paraA 和 paraonly 在 n0 上没有效果**（各救回 2、丢失 2），在 n3、n4 上的效果最大（+0.45 到 +0.60）。
+
+**目的地控制检验（D 组，`batch_1032`，2026-10-24，在任何 D 组结果之前写定）**
+
+动机：InstructMove 的原则，以及评审对"it 是否只是默认去向"的质疑。从 `batch_1026` 的同一批抓稳状态（n0、n3、n4）出发，接续指令把物体抽象掉，目的地词改成**不是原目标**的另一个可达目的地。
+
+| 条件 | n0（奶酪） | n3（酒瓶） | n4（酒瓶） |
+|---|---|---|---|
+| it-alt1 | put it on the stove | put it on the stove | put it on the plate |
+| it-alt2 | put it on top of the cabinet | put it on top of the cabinet | put it on top of the cabinet |
+| obj-alt1 | put the object on the stove | put the object on the stove | put the object on the plate |
+| obj-alt2 | put the object on top of the cabinet | （同左） | （同左） |
+
+对照：none-A（原指令），以及 `batch_1029` 的 obj-it / obj-generic（原目的地）。
+
+| 编号 | 预测 | 不成立时说明什么 |
+|---|---|---|
+| D1 | it-alt1、it-alt2 的 6 格中至少 4 格：手里的物体落在指令说的目的地 ≥ 0.5，且比 none-A 下落到同一目的地的比例高 ≥ 0.3 | 抽象物体名后机器人不跟随目的地词：W1 的收益可能来自默认去向或一般简化，而不是恢复了目的地控制 |
+| D2（只描述） | the object 和 it 在同一格上的差 | — |
+
+- 已知限制：酒瓶放上盘子本身就难（n4→盘子可能偏低）。这个限制在写定预测前就已知道，不据此调整阈值。
