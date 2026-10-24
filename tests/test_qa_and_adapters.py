@@ -292,6 +292,19 @@ def test_probe_goals_never_hold_and_moved_object(tmp_path, capsys):
     assert "moved {'akita_black_bowl_1': 1}" in capsys.readouterr().out
 
 
+def test_traj_sim_resample_and_post_grasp():
+    spec = importlib.util.spec_from_file_location("ts", Path(__file__).parents[1] / "scripts/traj_sim.py")
+    ts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ts)
+    line = np.array([[0, 0, 0], [1, 0, 0], [3, 0, 0]], float)
+    assert np.allclose(ts.resample(line, 4)[:, 0], [0, 1, 2, 3])
+    z = np.array([0, 0, 0, 0.01, 0.02, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1])
+    xyz = np.stack([np.zeros_like(z), np.zeros_like(z), z], 1)
+    grip = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], float)            # 1 = open here: closes at frame 2
+    assert np.allclose(ts.post_grasp(xyz, grip)[0], [0, 0, 0.04])          # first frame 3 cm above the close
+    assert ts.post_grasp(xyz, np.ones_like(z)) is None                       # never closes
+
+
 def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
     ea = importlib.util.module_from_spec(spec)
