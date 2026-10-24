@@ -26,6 +26,32 @@ class GraspDetector:
         return self.stable_step is not None
 
 
+class ActionGraspTrigger:
+    """Deployable "something is held and lifted" signal from what the policy itself sees and does: the gripper
+    command (LIBERO env action[6], +1 = close) has stayed closed for `k` steps and the end effector (proprio
+    robot0_eef_pos) has risen `lift_m` since the close began. No object identity, contact or simulator truth: if the
+    wrong object (or nothing) is held, it still fires. Latches once fired."""
+
+    def __init__(self, lift_m: float = 0.03, k: int = 5):
+        self.lift_m, self.k = lift_m, k
+        self.onset_z: float | None = None
+        self.closed = 0
+        self.step: int | None = None
+
+    def update(self, gripper_cmd: float, eef_z: float, t: int) -> bool:
+        if self.step is not None:
+            return True
+        if gripper_cmd > 0:
+            if self.closed == 0:
+                self.onset_z = eef_z
+            self.closed += 1
+            if self.closed >= self.k and eef_z - self.onset_z >= self.lift_m:
+                self.step = t
+        else:
+            self.closed, self.onset_z = 0, None
+        return self.step is not None
+
+
 def classify_outcome(*, target_goal: int, executed: int | None, target_grasped_end: bool, target_z_end: float,
                      rest_z: float, other_grasped: bool, eef_path_end: float,
                      table_tol: float = 0.02, still_tol: float = 0.005) -> str:

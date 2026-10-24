@@ -1,5 +1,5 @@
 {
- "_doc": "RESEARCH_PLAN \u00a711.9 A2 (LIBERO-Goal pilot, 2026-10-24): n0, n3, n4 as in configs/novel_goals.json, and a0, a3, a4 = the same goals (same predicates) instructed with the object abstracted from the episode start.",
+ "_doc": "RESEARCH_PLAN \u00a711.9 A2 (LIBERO-Goal pilot, 2026-10-24): n0-n4 as in configs/novel_goals.json, and a0-a4 = the same goals (same predicates) instructed with the object abstracted from the episode start.",
  "goals": [
   {
    "id": "n0",
@@ -70,6 +70,54 @@
      "on",
      "wine_bottle_1",
      "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "n1",
+   "kind": "new_object",
+   "language": "put the cream cheese on the stove",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "a1",
+   "kind": "it_from_start",
+   "language": "put it on the stove",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "n2",
+   "kind": "new_object",
+   "language": "put the cream cheese on top of the cabinet",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "wooden_cabinet_1_top_side"
+    ]
+   ]
+  },
+  {
+   "id": "a2",
+   "kind": "it_from_start",
+   "language": "put it on top of the cabinet",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "wooden_cabinet_1_top_side"
     ]
    ]
   }

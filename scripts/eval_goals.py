@@ -41,6 +41,9 @@ def main() -> None:
     ap.add_argument("--hold_steps", type=int, default=10)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--init_offset", type=int, default=0, help="use init states init_offset .. init_offset+n_init-1")
+    ap.add_argument("--trigger", default="oracle", choices=["oracle", "action"],
+                    help="oracle: GraspDetector on the target (contact + height truth); action: ActionGraspTrigger "
+                         "(own close command + eef lift only, deployable)")
     ap.add_argument("--switch", default="", help="'goal=instruction;...': once the goal's target is stably grasped "
                     "(langeval.phase.GraspDetector), the next policy query uses this instruction (a goal name or text); "
                     "the chunk already queued finishes first. Success is still the goal's own predicate.")
@@ -72,7 +75,7 @@ def main() -> None:
     for kv in filter(None, args.switch.split(";")):
         g, text = kv.split("=", 1)
         switch[g] = goals[names.index(text)].language if text in names else text
-    from langeval.phase import GraspDetector, is_grasped, object_z
+    from langeval.phase import ActionGraspTrigger, GraspDetector, is_grasped, object_z
     episodes = open(out / "episodes.jsonl", "w")
     for gi, task_id in todo:
         env, _ = make_env(suite, task_id)
@@ -82,13 +85,18 @@ def main() -> None:
             start_pos = {n: np.asarray(v).tolist() for n, v in obs.items() if n.endswith("pos")}
             tracker = GoalTracker(len(goals), args.hold_steps, prefer=gi)
             target, sw = goals[gi].target, switch.get(names[gi])
-            det = GraspDetector(object_z(env, target)) if sw and target else None
-            lang = {"now": goals[gi].language, "switch_step": None}
+            det = None if not (sw and target) else (
+                GraspDetector(object_z(env, target)) if args.trigger == "oracle" else ActionGraspTrigger())
+            lang = {"now": goals[gi].language, "switch_step": None, "target_held_at_switch": None}
+            executed_actions = []                     # every action handed to the env, in order
 
             def on_step(t, o):
-                if det is not None and lang["switch_step"] is None and \
-                        det.update(object_z(env, target), is_grasped(env, target), t):
-                    lang["now"], lang["switch_step"] = sw, t
+                if det is not None and lang["switch_step"] is None:
+                    fired = det.update(object_z(env, target), is_grasped(env, target), t) if args.trigger == "oracle" \
+                        else det.update(float(executed_actions[t - 1][6]), float(o["robot0_eef_pos"][2]), t)
+                    if fired:
+                        lang["now"], lang["switch_step"] = sw, t
+                        lang["target_held_at_switch"] = is_grasped(env, target)    # diagnostic only
                 sat = satisfied(env, goals)
                 tracker.update(sat, t)
                 return sat[gi]                        # LIBERO done: instructed goal holds now
@@ -99,7 +107,9 @@ def main() -> None:
                         policy.begin()
 
                 def act(self, o, _instruction):
-                    return policy.act(o, lang["now"])
+                    chunk = policy.act(o, lang["now"])
+                    executed_actions.extend(np.asarray(a, float) for a in chunk)
+                    return chunk
             r = rollout(env, Switching() if det is not None else policy, goals[gi].language, obs, steps=max_steps,
                         on_step=on_step)
             success = r["error"] is None and tracker.last[gi]
@@ -113,6 +123,8 @@ def main() -> None:
                 "steps": r["steps"], "error": r["error"],
                 "final_satisfied": [names[i] for i, v in enumerate(tracker.last) if v],
                 "start_pos": start_pos, "switch_to": sw, "switch_step": lang["switch_step"],
+                "trigger": args.trigger if det is not None else None,
+                "target_held_at_switch": lang["target_held_at_switch"],
                 "final_pos": {k: np.asarray(v).tolist() for k, v in (r["obs"] or {}).items() if k.endswith("pos")}})
                 + "\n")
             episodes.flush()

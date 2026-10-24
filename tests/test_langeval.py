@@ -160,3 +160,14 @@ def test_goal_tracker_records_every_completed_goal():
     for t, sat in enumerate([[False, True], [False, True], [True, True], [True, False]], start=1):
         tr.update(sat, t)
     assert tr.executed == 1 and tr.completed == {1: 2, 0: 4}
+
+
+def test_action_grasp_trigger_needs_sustained_close_and_lift():
+    from langeval.phase import ActionGraspTrigger
+    tr = ActionGraspTrigger(lift_m=0.03, k=3)
+    assert not tr.update(-1, 0.10, 1)                       # open
+    assert not tr.update(1, 0.10, 2) and not tr.update(1, 0.11, 3)
+    assert not tr.update(-1, 0.20, 4)                       # reopened: onset resets
+    assert not tr.update(1, 0.20, 5) and not tr.update(1, 0.21, 6)
+    assert tr.update(1, 0.24, 7) and tr.step == 7            # 3 closed steps, +4 cm since onset
+    assert tr.update(-1, 0.0, 8)                            # latched
