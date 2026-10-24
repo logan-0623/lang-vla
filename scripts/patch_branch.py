@@ -312,6 +312,27 @@ def branch(args) -> None:
     env.close()
 
 
+def landing_sites(es: list, sites: dict) -> Counter:
+    """Per episode: the object that moved most (> 5 cm) and the nearest region site / movable object to its final xy
+    within 8 cm ('elsewhere' beyond; 'lifted' if it ends > 5 cm above its start, i.e. still held)."""
+    c = Counter()
+    for e in es:
+        objs = [k for k in e["start_pos"] if k in e["final_pos"] and not k.startswith("robot") and "_to_" not in k]
+        k, m = max(((k, np.linalg.norm(np.subtract(e["final_pos"][k], e["start_pos"][k]))) for k in objs),
+                   key=lambda kv: kv[1])
+        if m <= 0.05:
+            c["none moved"] += 1
+            continue
+        end = np.asarray(e["final_pos"][k])
+        if end[2] - e["start_pos"][k][2] > 0.05:
+            c[f"{k[:-4]} lifted"] += 1
+            continue
+        cand = {**sites, **{o[:-4]: e["final_pos"][o] for o in objs if o != k}}
+        n, d = min(((n, np.linalg.norm((end - np.asarray(p))[:2])) for n, p in cand.items()), key=lambda x: x[1])
+        c[f"{k[:-4]} -> {n if d < 0.08 else 'elsewhere'}"] += 1
+    return c
+
+
 def moved(args) -> None:
     """For an eval_goals run (start_pos / final_pos per episode): per goal, the executed goal and which object moved
     most (> 5 cm, else none) - for the key probes, which never succeed by construction."""
@@ -329,6 +350,8 @@ def moved(args) -> None:
                 mv[k[:-4] if m > 0.05 else "none"] += 1
             print(f"  {g:<3} {es[0]['language']!r:<45} executed {dict(Counter(str(e['executed']) for e in es).most_common())}"
                   f"  moved {dict(mv.most_common())}")
+            if args.sites:
+                print(f"      moved object ends near (xy < 8 cm): {dict(landing_sites(es, json.load(open(args.sites))).most_common())}")
 
 
 def report(args) -> None:
@@ -403,6 +426,7 @@ def main() -> None:
     nm.add_argument("--conds", default="dest:4,random:4,dest_c:16,random:16,dest_c:64,random:64")
     mo = sub.add_parser("moved")
     mo.add_argument("runs", nargs="+")
+    mo.add_argument("--sites", default=None, help="region positions from scripts/feasible.py --sites")
     r = sub.add_parser("report")
     r.add_argument("runs", nargs="+")
     a = ap.parse_args()

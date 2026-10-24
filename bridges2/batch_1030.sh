@@ -20,7 +20,7 @@ unset LV_PATCH
 case ${1:-} in
   feasible)
     log "$(sbatch --parsable -t 0:30:00 -J s3-feasible --export=ALL,ENV=vla bridges2/run.sbatch \
-      python scripts/feasible.py --goals_json $J)" feasible ;;
+      python scripts/feasible.py --goals_json $J --sites $D/sites.json)" feasible ;;
   run)
     G=${2:?give the feasible goals, e.g. h0,h2,h3}
     sw() { python - "$J" "$1" "$G" <<'PY'
@@ -44,6 +44,7 @@ for g, s in json.load(open('$D/$r/summary.json')).items():
     sw = sum(e.get('switch_step') is not None for e in eps if e['goal'] == g)
     print(f\"  {g} success {s['success']:.2f} (n={s['n']})  switched {sw}  executed {s['executed']}\")"
     done
-    python scripts/patch_branch.py moved $(ls -d $D/*/) ;;
+    SITES=; [ -f $D/sites.json ] && SITES="--sites $D/sites.json"
+    python scripts/patch_branch.py moved $(ls -d $D/*/) $SITES ;;
   *) echo "usage: $0 feasible | run <goals> | report" >&2; exit 1 ;;
 esac

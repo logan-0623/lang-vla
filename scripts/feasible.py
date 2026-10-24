@@ -19,6 +19,9 @@ def main() -> None:
     ap.add_argument("--n_init", type=int, default=10)
     ap.add_argument("--steps", type=int, default=50)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--drop", type=float, default=0.01, help="release height above the destination (m); 0.05 tipped "
+                    "the wine bottle out of the bowl although the arm can place it (batch_1030)")
+    ap.add_argument("--sites", default=None, help="also write the region sites' world positions (init 0) to this json")
     a = ap.parse_args()
     from libero.libero import benchmark
     from langeval.adapters.starvla import make_env
@@ -27,6 +30,13 @@ def main() -> None:
     suite = benchmark.get_benchmark_dict()["libero_goal"]()
     env, _ = make_env(suite, 0)
     inits = suite.get_task_init_states(0)
+    if a.sites:
+        settle(env, inits[0], seed=a.seed * 100_000)
+        sim = env.env.sim
+        pos = {n: np.array(sim.data.get_site_xpos(n)).round(4).tolist() for n in env.env.object_sites_dict
+               if n.endswith("_region")}
+        json.dump(pos, open(a.sites, "w"), indent=1)
+        print(f"{len(pos)} region sites -> {a.sites}")
     specs = json.load(open(a.goals_json))["goals"]
     for spec, goal in zip(specs, load_novel_goals(a.goals_json)):
         kind, obj, dest = goal.predicates[0]
@@ -37,7 +47,7 @@ def main() -> None:
             to = (np.array(sim.data.get_site_xpos(dest)) if dest in env.env.object_sites_dict
                   else np.array(sim.data.body_xpos[env.env.obj_body_id[dest]]))
             here = np.array(sim.data.body_xpos[env.env.obj_body_id[obj]])
-            shift_object(env, obj, list(to[:2] - here[:2]) + [to[2] + 0.05 - here[2]])
+            shift_object(env, obj, list(to[:2] - here[:2]) + [to[2] + a.drop - here[2]])
             for _ in range(a.steps):
                 env.step(DUMMY_ACTION)
             ok += satisfied(env, [goal])[0]
