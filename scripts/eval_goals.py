@@ -40,6 +40,10 @@ def main() -> None:
     ap.add_argument("--n_init", type=int, default=20)
     ap.add_argument("--hold_steps", type=int, default=10)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--init_offset", type=int, default=0, help="use init states init_offset .. init_offset+n_init-1")
+    ap.add_argument("--switch", default="", help="'goal=instruction;...': once the goal's target is stably grasped "
+                    "(langeval.phase.GraspDetector), the next policy query uses this instruction (a goal name or text); "
+                    "the chunk already queued finishes first. Success is still the goal's own predicate.")
     args = ap.parse_args()
     suite_name = "libero_goal"
 
@@ -64,20 +68,40 @@ def main() -> None:
            ([(len(seen) + j, 0) for j in range(len(novel))] if "novel" in sets else [])   # (goal, env task); scene is shared
     if args.goals:
         todo = [(gi, t) for gi, t in todo if names[gi] in args.goals.split(",")]
+    switch = {}
+    for kv in filter(None, args.switch.split(";")):
+        g, text = kv.split("=", 1)
+        switch[g] = goals[names.index(text)].language if text in names else text
+    from langeval.phase import GraspDetector, is_grasped, object_z
     episodes = open(out / "episodes.jsonl", "w")
     for gi, task_id in todo:
         env, _ = make_env(suite, task_id)
         inits = get_init_states(suite, task_id)
-        for k in range(min(args.n_init, len(inits))):
+        for k in range(args.init_offset, min(args.init_offset + args.n_init, len(inits))):
             obs = settle(env, inits[k], seed=args.seed * 100_000 + gi * 1000 + k)
             start_pos = {n: np.asarray(v).tolist() for n, v in obs.items() if n.endswith("pos")}
             tracker = GoalTracker(len(goals), args.hold_steps, prefer=gi)
+            target, sw = goals[gi].target, switch.get(names[gi])
+            det = GraspDetector(object_z(env, target)) if sw and target else None
+            lang = {"now": goals[gi].language, "switch_step": None}
 
             def on_step(t, o):
+                if det is not None and lang["switch_step"] is None and \
+                        det.update(object_z(env, target), is_grasped(env, target), t):
+                    lang["now"], lang["switch_step"] = sw, t
                 sat = satisfied(env, goals)
                 tracker.update(sat, t)
                 return sat[gi]                        # LIBERO done: instructed goal holds now
-            r = rollout(env, policy, goals[gi].language, obs, steps=max_steps, on_step=on_step)
+
+            class Switching:                          # the policy sees lang["now"] at every new query
+                def begin(self):
+                    if hasattr(policy, "begin"):
+                        policy.begin()
+
+                def act(self, o, _instruction):
+                    return policy.act(o, lang["now"])
+            r = rollout(env, Switching() if det is not None else policy, goals[gi].language, obs, steps=max_steps,
+                        on_step=on_step)
             success = r["error"] is None and tracker.last[gi]
             others = sorted((t, i) for i, t in tracker.completed.items() if i != gi)
             episodes.write(json.dumps({
@@ -88,7 +112,7 @@ def main() -> None:
                 "first_satisfied": {names[i]: t for i, t in tracker.first_satisfied.items()},
                 "steps": r["steps"], "error": r["error"],
                 "final_satisfied": [names[i] for i, v in enumerate(tracker.last) if v],
-                "start_pos": start_pos,
+                "start_pos": start_pos, "switch_to": sw, "switch_step": lang["switch_step"],
                 "final_pos": {k: np.asarray(v).tolist() for k, v in (r["obs"] or {}).items() if k.endswith("pos")}})
                 + "\n")
             episodes.flush()

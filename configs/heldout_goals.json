@@ -1,0 +1,61 @@
+{
+ "_doc": "RESEARCH_PLAN \u00a711.8 B (stage 3), frozen 2026-10-23 before any run: held-out object x destination combinations, never run in development. switch_it: the instruction after a stable grasp of the target (destination words as in the seen LIBERO-Goal instructions); switch_seen: a seen goal with the same destination, if any. Feasibility: scripts/feasible.py.",
+ "goals": [
+  {
+   "id": "h0",
+   "kind": "heldout",
+   "language": "put the cream cheese in front of the stove",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "main_table_stove_front_region"
+    ]
+   ],
+   "switch_it": "put it in front of the stove",
+   "switch_seen": null
+  },
+  {
+   "id": "h1",
+   "kind": "heldout",
+   "language": "put the wine bottle in front of the stove",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "main_table_stove_front_region"
+    ]
+   ],
+   "switch_it": "put it in front of the stove",
+   "switch_seen": null
+  },
+  {
+   "id": "h2",
+   "kind": "heldout",
+   "language": "put the cream cheese on the rack",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "wine_rack_1_top_region"
+    ]
+   ],
+   "switch_it": "put it on the rack",
+   "switch_seen": "s9"
+  },
+  {
+   "id": "h3",
+   "kind": "heldout",
+   "language": "put the wine bottle in the bowl",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "akita_black_bowl_1"
+    ]
+   ],
+   "switch_it": "put it in the bowl",
+   "switch_seen": "s6"
+  }
+ ]
+}
