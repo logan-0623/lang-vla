@@ -305,6 +305,19 @@ def test_traj_sim_resample_and_post_grasp():
     assert ts.post_grasp(xyz, np.ones_like(z)) is None                       # never closes
 
 
+def test_paired_counts_and_mcnemar(tmp_path, capsys):
+    spec = importlib.util.spec_from_file_location("pb", Path(__file__).parents[1] / "scripts/patch_branch.py")
+    pb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pb)
+    assert pb.mcnemar_p(0, 0) == 1.0 and abs(pb.mcnemar_p(6, 0) - 2 / 64) < 1e-12
+    for name, succ in (("a", [0, 0, 1, 1]), ("b", [1, 1, 1, 0])):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "episodes.jsonl").write_text(
+            "".join(json.dumps({"goal": "n3", "init": i, "success": bool(v)}) + "\n" for i, v in enumerate(succ)))
+    pb.paired(argparse.Namespace(base=str(tmp_path / "a"), runs=[str(tmp_path / "b")]))
+    assert "rescued 2  lost 1" in capsys.readouterr().out
+
+
 def test_landing_anchors_use_seen_successes_only(tmp_path, capsys):
     spec = importlib.util.spec_from_file_location("ea", Path(__file__).parents[1] / "scripts/erase_action.py")
     ea = importlib.util.module_from_spec(spec)

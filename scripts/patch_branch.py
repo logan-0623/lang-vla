@@ -312,6 +312,35 @@ def branch(args) -> None:
     env.close()
 
 
+def mcnemar_p(b: int, c: int) -> float:
+    """Exact two-sided McNemar p from the discordant counts (binomial, p = 0.5)."""
+    from math import comb
+    n, k = b + c, min(b, c)
+    return 1.0 if n == 0 else min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
+
+
+def paired(args) -> None:
+    """B vs the baseline A on the same (goal, init) states: rescued (A fail, B success), lost (A success, B fail),
+    exact McNemar p and a bootstrap 95% CI of the success difference (resampling states), per goal and pooled."""
+    def load(d):
+        return {(e["goal"], e["init"]): bool(e["success"]) for e in map(json.loads, open(Path(d) / "episodes.jsonl"))}
+    base = load(args.base)
+    rng = np.random.default_rng(0)
+    for d in args.runs:
+        other = load(d)
+        keys = sorted(set(base) & set(other))
+        print(f"{Path(d).name} vs {Path(args.base).name}  ({len(keys)} paired states)")
+        for g in [*dict.fromkeys(k[0] for k in keys), "all"]:
+            ks = [k for k in keys if g == "all" or k[0] == g]
+            a = np.array([base[k] for k in ks], int)
+            b = np.array([other[k] for k in ks], int)
+            res, lost = int(((a == 0) & (b == 1)).sum()), int(((a == 1) & (b == 0)).sum())
+            boot = [(b[i] - a[i]).mean() for i in (rng.integers(0, len(ks), len(ks)) for _ in range(2000))]
+            lo, hi = np.percentile(boot, [2.5, 97.5])
+            print(f"  {g:<4} {a.sum():>2} -> {b.sum():>2} / {len(ks):<3} rescued {res:<2} lost {lost:<2} "
+                  f"diff {(b - a).mean():+.2f} [{lo:+.2f}, {hi:+.2f}]  McNemar p {mcnemar_p(res, lost):.3g}")
+
+
 def landing_sites(es: list, sites: dict) -> Counter:
     """Per episode: the object that moved most (> 5 cm) and the nearest region site / movable object to its final xy
     within 8 cm ('elsewhere' beyond; 'lifted' if it ends > 5 cm above its start, i.e. still held)."""
@@ -424,13 +453,16 @@ def main() -> None:
     nm.add_argument("--rec", required=True)
     nm.add_argument("--subspaces", required=True)
     nm.add_argument("--conds", default="dest:4,random:4,dest_c:16,random:16,dest_c:64,random:64")
+    pa = sub.add_parser("paired")
+    pa.add_argument("base", help="baseline run (e.g. none-A)")
+    pa.add_argument("runs", nargs="+")
     mo = sub.add_parser("moved")
     mo.add_argument("runs", nargs="+")
     mo.add_argument("--sites", default=None, help="region positions from scripts/feasible.py --sites")
     r = sub.add_parser("report")
     r.add_argument("runs", nargs="+")
     a = ap.parse_args()
-    {"collect": collect, "branch": branch, "probe": probe, "attn": attn, "norms": norms, "moved": moved, "report": report}[a.cmd](a)
+    {"collect": collect, "branch": branch, "probe": probe, "attn": attn, "norms": norms, "moved": moved, "paired": paired, "report": report}[a.cmd](a)
 
 
 if __name__ == "__main__":
