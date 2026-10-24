@@ -1,0 +1,77 @@
+{
+ "_doc": "RESEARCH_PLAN \u00a711.9 A2 (LIBERO-Goal pilot, 2026-10-24): n0, n3, n4 as in configs/novel_goals.json, and a0, a3, a4 = the same goals (same predicates) instructed with the object abstracted from the episode start.",
+ "goals": [
+  {
+   "id": "n0",
+   "kind": "new_object",
+   "language": "put the cream cheese on the plate",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "n3",
+   "kind": "new_object",
+   "language": "put the wine bottle on the plate",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "n4",
+   "kind": "new_object",
+   "language": "put the wine bottle on the stove",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  },
+  {
+   "id": "a0",
+   "kind": "it_from_start",
+   "language": "put it on the plate",
+   "predicates": [
+    [
+     "on",
+     "cream_cheese_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "a3",
+   "kind": "it_from_start",
+   "language": "put it on the plate",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "plate_1"
+    ]
+   ]
+  },
+  {
+   "id": "a4",
+   "kind": "it_from_start",
+   "language": "put it on the stove",
+   "predicates": [
+    [
+     "on",
+     "wine_bottle_1",
+     "flat_stove_1_cook_region"
+    ]
+   ]
+  }
+ ]
+}
