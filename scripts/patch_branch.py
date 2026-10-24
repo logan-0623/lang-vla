@@ -322,7 +322,8 @@ def moved(args) -> None:
             es = [e for e in eps if e["goal"] == g]
             mv = Counter()
             for e in es:
-                objs = [k for k in e["start_pos"] if k in e["final_pos"] and not k.startswith("robot")]
+                objs = [k for k in e["start_pos"] if k in e["final_pos"] and not k.startswith("robot")
+                        and "_to_" not in k]                    # obj_to_robot0_eef_pos moves with the arm
                 k, m = max(((k, np.linalg.norm(np.subtract(e["final_pos"][k], e["start_pos"][k]))) for k in objs),
                            key=lambda kv: kv[1])
                 mv[k[:-4] if m > 0.05 else "none"] += 1

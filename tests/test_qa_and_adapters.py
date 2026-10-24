@@ -283,8 +283,10 @@ def test_probe_goals_never_hold_and_moved_object(tmp_path, capsys):
     run = tmp_path / "keys"
     run.mkdir()
     e = {"goal": "k1", "language": "put the plate on the bowl", "executed": "s8",
-         "start_pos": {"plate_1_pos": [0, 0, 0], "akita_black_bowl_1_pos": [0, 0, 0], "robot0_eef_pos": [0, 0, 0]},
-         "final_pos": {"plate_1_pos": [0, 0.01, 0], "akita_black_bowl_1_pos": [0.2, 0, 0], "robot0_eef_pos": [1, 1, 1]}}
+         "start_pos": {"plate_1_pos": [0, 0, 0], "akita_black_bowl_1_pos": [0, 0, 0], "robot0_eef_pos": [0, 0, 0],
+                       "plate_1_to_robot0_eef_pos": [0, 0, 0]},
+         "final_pos": {"plate_1_pos": [0, 0.01, 0], "akita_black_bowl_1_pos": [0.2, 0, 0], "robot0_eef_pos": [1, 1, 1],
+                       "plate_1_to_robot0_eef_pos": [1, 1, 1]}}
     (run / "episodes.jsonl").write_text(json.dumps(e) + "\n")
     pb.moved(argparse.Namespace(runs=[str(run)]))
     assert "moved {'akita_black_bowl_1': 1}" in capsys.readouterr().out
